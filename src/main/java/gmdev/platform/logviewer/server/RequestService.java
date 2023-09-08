@@ -87,20 +87,22 @@ public class RequestService {
         Criteria newCriteria = Criteria.where("status").is(LogEntryStatus.NEW);
         if (statusEnums.contains(LogEntryStatus.NEW)) criteriaOrList.add(newCriteria);
 
-        Criteria triageCriteria = new Criteria();
-        triageCriteria.andOperator(
-                Criteria.where("status").is(LogEntryStatus.TRIAGE),
+        Criteria ackedCriteria = new Criteria();
+        ackedCriteria.andOperator(
+                Criteria.where("status").is(LogEntryStatus.ACKED),
                 teamOr
         );
-        if (statusEnums.contains(LogEntryStatus.TRIAGE)) criteriaOrList.add(triageCriteria);
+        if (statusEnums.contains(LogEntryStatus.ACKED)) criteriaOrList.add(ackedCriteria);
 
-        Criteria watchCriteria = new Criteria();
-        watchCriteria.andOperator(
-                Criteria.where("status").is(LogEntryStatus.WATCH),
+        Criteria resolvedVriteria = new Criteria();
+        resolvedVriteria.andOperator(
+                Criteria.where("status").is(LogEntryStatus.RESOLVED),
                 teamOr
         );
-        if (statusEnums.contains(LogEntryStatus.WATCH)) criteriaOrList.add(watchCriteria);
+        if (statusEnums.contains(LogEntryStatus.RESOLVED)) criteriaOrList.add(resolvedVriteria);
 
+
+        /*
         Criteria hideCriteria = new Criteria();
         hideCriteria.andOperator(
                 Criteria.where("status").is(LogEntryStatus.HIDE),
@@ -109,7 +111,7 @@ public class RequestService {
                 teamOr
         );
         if (statusEnums.contains(LogEntryStatus.HIDE)) criteriaOrList.add(hideCriteria);
-
+        */
 
 
         //combine the appropriate criteria based on selected statuses
@@ -119,7 +121,7 @@ public class RequestService {
         } else if (criteriaOrList.size() == 1) {
             criteria = criteriaOrList.get(0);
         } else if (criteriaOrList.size() == 0) {
-            criteria = Criteria.where("status").ne(LogEntryStatus.HIDE);
+            criteria = Criteria.where("status").exists(true); //TODO was hide
         }
 
 
@@ -127,7 +129,7 @@ public class RequestService {
         //add the log type part of the query
         Criteria finalCriteria;
         if (types != null && types.size() > 0) {
-            Criteria logType = Criteria.where("logType").in(types);
+            Criteria logType = Criteria.where("alert.labels.severity").in(types);
             finalCriteria = new Criteria().andOperator(criteria, logType);
         } else {
             finalCriteria = criteria;
@@ -136,15 +138,16 @@ public class RequestService {
 
 
         query.addCriteria(finalCriteria);
-        query.with(Sort.by(Sort.Direction.DESC, "lastOccurence"));
+        query.with(Sort.by(Sort.Direction.DESC, "alert.startsAt"));
         log.debug("QUERY: "+query.toString());
         List<AlertManagerEntry> list = mongo.find(query, AlertManagerEntry.class);
 
 
         //build URLs
+       /*
         final String urlTemplate = env.getProperty("kibana.url");
         if (urlTemplate != null && !urlTemplate.isEmpty()) {
-            /*
+
             for (AlertManagerEntry entry: list) {
                 for (Occurence occ:entry.getOccurences()) {
                     String url = urlTemplate;
@@ -154,8 +157,10 @@ public class RequestService {
                 }
             }
 
-             */
+
         }
+
+        */
         return new RequestResponse(list, export);
     }
 }
