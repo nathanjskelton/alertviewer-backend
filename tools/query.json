@@ -1,0 +1,58 @@
+{
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "bool": {
+            "should": [
+              {
+                "match_phrase": {
+                  "priority": {
+                    "query": "ERROR"
+                  }
+                }
+              },
+              {
+                "match_phrase": {
+                  "priority": {
+                    "query": "WARN"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "query_string": {
+            "query": "General",
+            "analyze_wildcard": true
+          }
+        },
+        {
+          "match_phrase": {
+            "fields.log_type": {
+              "query": "General"
+            }
+          }
+        },
+        {
+          "match_phrase": {
+            "fields.env": {
+              "query": "production"
+            }
+          }
+        },
+        {
+          "range": {
+            "@timestamp": {
+              "format": "strict_date_optional_time",
+              "from": "__start-time__",
+              "to": "__end-time__"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+

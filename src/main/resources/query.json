@@ -1,0 +1,50 @@
+{
+  "$or": [
+    {
+      "$and": [
+        {
+          "status": {
+            "$java": NEW
+          }
+        }
+      ]
+    },
+    {
+      "$and": [
+        {
+          "status": {
+            "$java": TRIAGE
+          }
+        },
+        {
+          "teams": {
+            "$in": [
+              {
+                "$java": DEV
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "$and": [
+        {
+          "status": {
+            "$java": WATCH
+          }
+        },
+        {
+          "teams": {
+            "$in": [
+              {
+                "$java": DEV
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}, Fields: {}, Sort: {"lastOccurence": -1
+}
