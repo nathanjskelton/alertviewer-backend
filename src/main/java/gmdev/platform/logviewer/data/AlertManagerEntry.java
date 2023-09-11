@@ -14,6 +14,7 @@ import java.time.temporal.Temporal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 @Document(collection = "AlertManagerEntry")
 public class AlertManagerEntry {
@@ -121,5 +122,18 @@ public class AlertManagerEntry {
                 "id='" + id + '\'' +
                 ", status=" + status +
                 '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        AlertManagerEntry entry = (AlertManagerEntry) o;
+        return Objects.equals(alert, entry.alert);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(alert);
     }
 }

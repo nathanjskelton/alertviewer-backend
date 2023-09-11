@@ -12,6 +12,7 @@ import gmdev.platform.logviewer.ingest.EntryProcessor;
 import gmdev.platform.logviewer.ingest.IngestedEntry;
 import gmdev.platform.logviewer.ingest.Ingester;
 import gmdev.platform.logviewer.ingest.elastic.Parser;
+import gmdev.platform.logviewer.util.LogEntryStatus;
 import org.apache.http.HttpResponse;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
@@ -38,8 +39,10 @@ import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.text.DateFormat;
 import java.time.*;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Component
 @ConditionalOnProperty(value = "ingester.type", havingValue = "alertmanager")
@@ -98,6 +101,9 @@ public class AlertIngester implements Ingester {
             JSONObject json = new JSONObject(responseStrBuilder.toString());
             //log.info(json.toString());;
 
+            List<AlertManagerEntry> allActive = repo.findAll();
+
+            //process the incoming active alerts
             JSONArray data = json.getJSONArray("data");
             for (int i = 0;i < data.length();i++) {
                 String jsonAlert = data.getJSONObject(i).toString();
@@ -110,6 +116,7 @@ public class AlertIngester implements Ingester {
                 if (entryOpt.isPresent()) {
                     entry = entryOpt.get();
                     entry.setAlert(alert);
+                    allActive.remove(entry);
                 } else {
                     entry = new AlertManagerEntry(alert);
                 }
@@ -117,6 +124,14 @@ public class AlertIngester implements Ingester {
 
                 log.info(entry.toString());
             }
+
+            //process existing alerts that are not existing
+            for (AlertManagerEntry entry:allActive) {
+                entry.setStatus(LogEntryStatus.RESOLVED);
+                repo.save(entry);
+            }
+
+            //TODO timeout resolved alerts
 
         } catch(Exception e) {
             e.printStackTrace(System.out);
