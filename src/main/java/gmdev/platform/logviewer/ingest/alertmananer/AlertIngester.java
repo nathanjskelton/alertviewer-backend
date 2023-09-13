@@ -116,6 +116,10 @@ public class AlertIngester implements Ingester {
                 if (entryOpt.isPresent()) {
                     entry = entryOpt.get();
                     entry.setAlert(alert);
+                    if (LogEntryStatus.RESOLVED.equals(entry.getStatus())) {
+                        entry.addNote("System", "Previously RESOLVED alert is now NEW");
+                        entry.setStatus(LogEntryStatus.NEW);
+                    }
                     allActive.remove(entry);
                 } else {
                     entry = new AlertManagerEntry(alert);
@@ -127,8 +131,11 @@ public class AlertIngester implements Ingester {
 
             //process existing alerts that are not existing
             for (AlertManagerEntry entry:allActive) {
-                entry.setStatus(LogEntryStatus.RESOLVED);
-                repo.save(entry);
+                if (!LogEntryStatus.RESOLVED.equals(entry.getStatus())) {
+                    entry.setStatus(LogEntryStatus.RESOLVED);
+                    entry.addNote("System", "Alert is now RESOLVED");
+                    repo.save(entry);
+                }
             }
 
             //TODO timeout resolved alerts

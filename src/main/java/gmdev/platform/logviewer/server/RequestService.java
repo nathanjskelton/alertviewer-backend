@@ -28,15 +28,15 @@ public class RequestService {
 
 
 
-    public RequestResponse request(List<String> types, String start, String end,
-                                   List<String> statusStrings, List<String> teamStrings, boolean export)
+    public RequestResponse request(List<String> severity, String start, String end,
+                                   List<String> statusStrings, List<String> gminstances, boolean export)
             throws ServiceException {
 
+        log.debug("start="+start+", end="+end);
 
         LocalDateTime startDate = null;
         LocalDateTime endDate = null;
         List<LogEntryStatus> statusEnums = new ArrayList<>();
-        List<LogEntryTeam> teamEnums = new ArrayList<>();
 
         try {
             if (start != null && start.length() > 19) {
@@ -54,32 +54,17 @@ public class RequestService {
                     statusEnums.add(LogEntryStatus.valueOf(s));
                 }
             }
-            if (teamStrings != null) {
-                for (String s : teamStrings) {
-                    teamEnums.add(LogEntryTeam.valueOf(s));
-                }
-            }
+
         } catch(Exception e) {
             log.error("unable to parse arguments for request", e);
             throw new ServiceException("Invalid Arguments");
         }
 
+        log.debug("startDate="+startDate+", endDate="+endDate);
 
         Query query = new Query();
-        if (startDate == null) startDate = LocalDateTime.now().minusDays(1);
-        if (endDate == null) endDate = LocalDateTime.now();
-
-        //build the teams or
-        List<Criteria> teamCriteria = new ArrayList<>();
-        for (LogEntryTeam tm:teamEnums) {
-            Criteria c = Criteria.where("teams").in(tm);
-            teamCriteria.add(c);
-        }
-
-        teamCriteria.add(Criteria.where("teams").is(null));
-        teamCriteria.add(Criteria.where("teams").size(0));
-        Criteria teamOr = new Criteria().orOperator(teamCriteria.toArray(new Criteria[teamCriteria.size()]));
-
+        //if (startDate == null) startDate = LocalDateTime.now().minusDays(1);
+        //if (endDate == null) endDate = LocalDateTime.now();
 
         //build a criteria for each status
         List<Criteria> criteriaOrList = new ArrayList<>();
@@ -87,31 +72,11 @@ public class RequestService {
         Criteria newCriteria = Criteria.where("status").is(LogEntryStatus.NEW);
         if (statusEnums.contains(LogEntryStatus.NEW)) criteriaOrList.add(newCriteria);
 
-        Criteria ackedCriteria = new Criteria();
-        ackedCriteria.andOperator(
-                Criteria.where("status").is(LogEntryStatus.ACKED),
-                teamOr
-        );
+        Criteria ackedCriteria = Criteria.where("status").is(LogEntryStatus.ACKED);
         if (statusEnums.contains(LogEntryStatus.ACKED)) criteriaOrList.add(ackedCriteria);
 
-        Criteria resolvedVriteria = new Criteria();
-        resolvedVriteria.andOperator(
-                Criteria.where("status").is(LogEntryStatus.RESOLVED),
-                teamOr
-        );
-        if (statusEnums.contains(LogEntryStatus.RESOLVED)) criteriaOrList.add(resolvedVriteria);
-
-
-        /*
-        Criteria hideCriteria = new Criteria();
-        hideCriteria.andOperator(
-                Criteria.where("status").is(LogEntryStatus.HIDE),
-                Criteria.where("lastOccurence").gte(startDate),
-                Criteria.where("firstOccurence").lte(endDate),
-                teamOr
-        );
-        if (statusEnums.contains(LogEntryStatus.HIDE)) criteriaOrList.add(hideCriteria);
-        */
+        Criteria resolvedCriteria = Criteria.where("status").is(LogEntryStatus.RESOLVED);
+        if (statusEnums.contains(LogEntryStatus.RESOLVED)) criteriaOrList.add(resolvedCriteria);
 
 
         //combine the appropriate criteria based on selected statuses
@@ -120,47 +85,49 @@ public class RequestService {
             criteria.orOperator(criteriaOrList.toArray(new Criteria[criteriaOrList.size()]));
         } else if (criteriaOrList.size() == 1) {
             criteria = criteriaOrList.get(0);
-        } else if (criteriaOrList.size() == 0) {
+        } else {
             criteria = Criteria.where("status").exists(true); //TODO was hide
         }
 
 
-
-        //add the log type part of the query
-        Criteria finalCriteria;
-        if (types != null && types.size() > 0) {
-            Criteria logType = Criteria.where("alert.labels.severity").in(types);
-            finalCriteria = new Criteria().andOperator(criteria, logType);
-        } else {
-            finalCriteria = criteria;
+        //add the log severity part of the query
+        List<Criteria> andMe = new ArrayList<>();
+        if (startDate != null) {
+            log.debug("anding a startDate");
+            Criteria startDateCriteria = Criteria.where("alert.startsAt").gte(startDate);
+            andMe.add(startDateCriteria);
+        }
+        if (endDate != null) {
+            log.debug("anding a endDate");
+            Criteria endDateCriteria = Criteria.where("alert.endsAt").lte(endDate);
+            andMe.add(endDateCriteria);
+        }
+        if (severity != null && !severity.isEmpty()) {
+            log.debug("anding a severity");
+            Criteria severityCriteria = Criteria.where("alert.labels.severity").in(severity);
+            andMe.add(severityCriteria);
+        }
+        if (gminstances != null && !gminstances.isEmpty()) {
+            log.debug("anding a gm_instance");
+            Criteria gmInstancesCriteria = Criteria.where("alert.labels.gm_instance").in(gminstances);
+            andMe.add(gmInstancesCriteria);
         }
 
-
+        Criteria finalCriteria;
+        if (!andMe.isEmpty()) {
+            log.debug("making a query with ands");
+            andMe.add(criteria);
+            finalCriteria = new Criteria().andOperator(andMe.toArray(new Criteria[0]));
+        } else {
+            log.debug("making a query without ands");
+            finalCriteria = criteria;
+        }
 
         query.addCriteria(finalCriteria);
         query.with(Sort.by(Sort.Direction.DESC, "alert.startsAt"));
         log.debug("QUERY: "+query.toString());
         List<AlertManagerEntry> list = mongo.find(query, AlertManagerEntry.class);
 
-
-        //build URLs
-       /*
-        final String urlTemplate = env.getProperty("kibana.url");
-        if (urlTemplate != null && !urlTemplate.isEmpty()) {
-
-            for (AlertManagerEntry entry: list) {
-                for (Occurence occ:entry.getOccurences()) {
-                    String url = urlTemplate;
-                    url = url.replaceAll("__field__", "_id");
-                    url = url.replaceAll("__value__", occ.getId());
-                    occ.setUrl(url);
-                }
-            }
-
-
-        }
-
-        */
         return new RequestResponse(list, export);
     }
 }

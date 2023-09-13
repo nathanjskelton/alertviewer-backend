@@ -33,16 +33,16 @@ public class RestEndpoint {
 
 
     @GetMapping(value = "/export", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String export(@RequestParam(required = false,value = "type")List<String> type,
+    public String export(@RequestParam(required = false,value = "severity")List<String> severity,
                           @RequestParam(required = false,value = "start")String start,
                           @RequestParam(required = false,value = "end")String end,
                           @RequestParam(required = false,value = "statuses")List<String> statuses,
-                          @RequestParam(required = false,value = "teams")List<String> teams,
+                          @RequestParam(required = false,value = "gminstances")List<String> gminstances,
                           HttpServletResponse response) {
 
         response.setHeader("Content-Disposition", "attachment; filename=export.txt");
         try {
-            return requestService.request(type, start, end, statuses, teams, true).getContent();
+            return requestService.request(severity, start, end, statuses, gminstances, true).getContent();
         } catch (ServiceException e) {
             log.error("Export error: "+e.getMessage(), e);
             return "ERROR: "+e.getMessage();
@@ -51,14 +51,14 @@ public class RestEndpoint {
 
 
     @GetMapping(value = "/request", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<List<AlertManagerEntry>>> request(@RequestParam(required = false,value = "type")List<String> type,
+    public ResponseEntity<ServiceResponse<List<AlertManagerEntry>>> request(@RequestParam(required = false,value = "severity")List<String> severity,
                                                                             @RequestParam(required = false,value = "start")String start,
                                                                             @RequestParam(required = false,value = "end")String end,
                                                                             @RequestParam(required = false,value = "statuses")List<String> statuses,
-                                                                            @RequestParam(required = false,value = "teams")List<String> teams) {
+                                                                            @RequestParam(required = false,value = "gminstances")List<String> gminstances) {
 
         try {
-            return new ResponseEntity<>(new ServiceResponse<>("Query complete", requestService.request(type, start, end, statuses, teams, false).getEntries()), HttpStatus.OK);
+            return new ResponseEntity<>(new ServiceResponse<>("Query complete", requestService.request(severity, start, end, statuses, gminstances, false).getEntries()), HttpStatus.OK);
         } catch (ServiceException e) {
             log.error("Request error: "+e.getMessage(), e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);

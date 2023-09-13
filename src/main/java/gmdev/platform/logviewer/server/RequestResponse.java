@@ -26,13 +26,15 @@ public class RequestResponse {
         content.append("\n# ");
         content.append(entry.getId());
         content.append("\nRange: ");
-        //content.append(entry.getFirstOccurence());
+        content.append(entry.getFriendlyStartTime());
         content.append(" - ");
-        //content.append(entry.getLastOccurence());
+        content.append(entry.getFriendlyEndTime());
         content.append("\n");
         content.append("```");
         content.append("\n");
-        //content.append(entry.getMessage());
+        content.append(entry.getAlert().getLabels().get("alertname"));
+        content.append("\n");
+        content.append(entry.getAlert().getAnnotations().get("summary"));
         content.append("\n");
         content.append("```");
         content.append("\n");
