@@ -87,7 +87,8 @@ public class AlertIngester implements Ingester {
         */
 
         //HttpGet get = new HttpGet(env.getProperty("elastic.url"));
-        HttpGet get = new HttpGet("http://localhost:9093/api/v1/alerts");
+        HttpGet get = new HttpGet(env.getProperty("alertmanager.url"));
+        //HttpGet get = new HttpGet("http://localhost:9093/api/v1/alerts");
         //post.addHeader("Content-Type", "application/json");
         try {
             HttpResponse response = http.execute(get);
