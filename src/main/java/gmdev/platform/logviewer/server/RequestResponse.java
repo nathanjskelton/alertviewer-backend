@@ -10,16 +10,23 @@ public class RequestResponse {
     private List<AlertManagerEntry> entries;
     private StringBuilder content;
 
-    public RequestResponse(List<AlertManagerEntry> list, boolean export) {
+    private List<String> instances;
+
+    private List<String> severities;
+
+    public RequestResponse(List<AlertManagerEntry> list, List<String> instances,
+                           List<String> severities, boolean export) {
         this.export = export;
+        content = new StringBuilder();
         if (export) {
-            content = new StringBuilder();
             for (AlertManagerEntry entry:list) {
                 addEntry(entry);
             }
         } else {
             entries =list;
         }
+        this.instances = instances;
+        this.severities = severities;
     }
 
     private void addEntry(AlertManagerEntry entry) {
@@ -50,5 +57,13 @@ public class RequestResponse {
 
     public boolean isExport() {
         return export;
+    }
+
+    public List<String> getInstances() {
+        return instances;
+    }
+
+    public List<String> getSeverities() {
+        return severities;
     }
 }
