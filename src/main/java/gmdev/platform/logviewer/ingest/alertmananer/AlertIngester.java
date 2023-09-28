@@ -1,29 +1,25 @@
 package gmdev.platform.logviewer.ingest.alertmananer;
 
+import com.fasterxml.jackson.core.Version;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.util.ISO8601DateFormat;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import gmdev.platform.logviewer.data.Alert;
+import gmdev.platform.logviewer.data.alert.Alert;
 import gmdev.platform.logviewer.data.AlertManagerEntry;
 import gmdev.platform.logviewer.data.AlertManagerRepo;
 import gmdev.platform.logviewer.data.MetaDataHelper;
+import gmdev.platform.logviewer.data.silence.Silence;
 import gmdev.platform.logviewer.ingest.EntryProcessor;
-import gmdev.platform.logviewer.ingest.IngestedEntry;
 import gmdev.platform.logviewer.ingest.Ingester;
 import gmdev.platform.logviewer.ingest.elastic.Parser;
+import gmdev.platform.logviewer.server.CustomDateDeserializer;
+import gmdev.platform.logviewer.server.StateBuffer;
 import gmdev.platform.logviewer.util.LogEntryStatus;
 import org.apache.http.HttpResponse;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -34,15 +30,13 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
 import java.io.InputStreamReader;
-import java.text.DateFormat;
-import java.time.*;
-import java.util.HashSet;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.temporal.TemporalAmount;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 @Component
 @ConditionalOnProperty(value = "ingester.type", havingValue = "alertmanager")
@@ -64,6 +58,9 @@ public class AlertIngester implements Ingester {
 
     @Autowired
     AlertManagerRepo repo;
+
+    @Autowired
+    StateBuffer state;
 
     @Override
     public void ingest() {
@@ -88,6 +85,7 @@ public class AlertIngester implements Ingester {
 
         //HttpGet get = new HttpGet(env.getProperty("elastic.url"));
         HttpGet get = new HttpGet(env.getProperty("alertmanager.url"));
+        HttpGet get2 = new HttpGet(env.getProperty("alertmanager.silences.url"));
         //HttpGet get = new HttpGet("http://localhost:9093/api/v1/alerts");
         //post.addHeader("Content-Type", "application/json");
         try {
@@ -127,7 +125,7 @@ public class AlertIngester implements Ingester {
                 }
                 repo.save(entry);
 
-                log.info(entry.toString());
+                //log.debug(entry.toString());
             }
 
             //process existing alerts that are not existing
@@ -140,6 +138,43 @@ public class AlertIngester implements Ingester {
             }
 
             //TODO timeout resolved alerts
+
+            //silences
+
+            HttpResponse response2 = http.execute(get2);
+            BufferedReader bR2 = new BufferedReader(new InputStreamReader(response2.getEntity().getContent()));
+            line = "";
+
+            StringBuilder responseStrBuilder2 = new StringBuilder();
+            while((line =  bR2.readLine()) != null){
+                responseStrBuilder2.append(line);
+            }
+            JSONObject silencesJson = new JSONObject(responseStrBuilder2.toString());
+            //log.debug("SILENCES JSON: "+silencesJson.toString());
+
+            JSONArray silences = silencesJson.getJSONArray("data");
+            List<Silence> existingSilences = new ArrayList<>();
+            for (int i = 0;i < silences.length();i++) {
+                String jsonSilence = silences.getJSONObject(i).toString();
+                ObjectMapper objectMapper = new ObjectMapper();
+                objectMapper.registerModule(new JavaTimeModule());
+                objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+                final SimpleModule module = new SimpleModule("", Version.unknownVersion());
+                module.addDeserializer(LocalDateTime.class, new CustomDateDeserializer());
+                objectMapper.registerModule(module);
+                Silence silence = objectMapper.readValue(jsonSilence, Silence.class);
+                if (silence.getStatus().getState().equals("active")) {
+                    //set hours based on dates
+                    Duration dur = Duration.between(silence.getStartsat(), silence.getEndsat());
+                    silence.setHours(dur.toHours());
+                    Duration rem = Duration.between(LocalDateTime.now(), silence.getEndsat());
+                    silence.setHoursLeft(rem.toHours());
+
+                    existingSilences.add(silence);
+                }
+            }
+            state.setSilences(existingSilences);
+            log.debug("SILENCES ADDED: "+existingSilences.size());
 
         } catch(Exception e) {
             e.printStackTrace(System.out);

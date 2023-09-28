@@ -28,7 +28,8 @@ public class RequestService {
     @Autowired MongoTemplate mongo;
     @Autowired Environment env;
 
-
+    @Autowired
+    StateBuffer state;
 
 
     public RequestResponse request(List<String> severity, String start, String end,
@@ -138,6 +139,6 @@ public class RequestService {
             .collect(Collectors.toList());
         List<String> seve = StreamSupport.stream(severities.spliterator(), false)
                 .collect(Collectors.toList());
-        return new RequestResponse(list, inst, seve, export);
+        return new RequestResponse(list, state.getSilences(), inst, seve, export);
     }
 }

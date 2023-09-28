@@ -1,11 +1,23 @@
 package gmdev.platform.logviewer.server;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import gmdev.platform.logviewer.data.AlertManagerEntry;
 import gmdev.platform.logviewer.data.AlertManagerRepo;
 import gmdev.platform.logviewer.data.RegexRepo;
+import gmdev.platform.logviewer.data.silence.Silence;
+import gmdev.platform.logviewer.ingest.alertmananer.AlertIngester;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpDelete;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +25,9 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.time.LocalDateTime;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -30,6 +45,8 @@ public class RestEndpoint {
     AlertManagerRepo logRepo;
     @Autowired
     RegexRepo regexRepo;
+    @Autowired
+    Environment env;
 
 
     @GetMapping(value = "/export", produces = MediaType.TEXT_PLAIN_VALUE)
@@ -207,6 +224,66 @@ public class RestEndpoint {
             } else {
                 return new ResponseEntity<>(new ServiceResponse<>("Record not found"), HttpStatus.BAD_REQUEST);
             }
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @PostMapping(value = "/silence", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ServiceResponse<Void>> silence(@RequestBody String payload) {
+        try {
+            log.debug("SAVE SILENCE: "+payload);
+            ObjectMapper objectMapper = new ObjectMapper();
+            objectMapper.registerModule(new JavaTimeModule());
+            objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+            Silence silence = objectMapper.readValue(payload, Silence.class);
+
+            //convert hours to dates and set updated
+            LocalDateTime dnow = LocalDateTime.now();
+            silence.setStartsat(dnow);
+            silence.setUpdatedat(dnow);
+            LocalDateTime ends = dnow.plusHours(silence.getHours());
+            silence.setEndsat(ends);
+
+            ObjectMapper objectMapper2 = new ObjectMapper();
+            objectMapper2.registerModule(new JavaTimeModule());
+            objectMapper2.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+            String newJson = objectMapper2.writeValueAsString(silence);
+            HttpClient http = new DefaultHttpClient();
+            HttpPost post = new HttpPost(env.getProperty("alertmanager.silences.url"));
+            post.setEntity(new StringEntity(newJson));
+            HttpResponse response = http.execute(post);
+
+            if (response.getStatusLine().getStatusCode()==200) {
+                state.addSilence(silence);
+                return new ResponseEntity<>(new ServiceResponse<>("Silence added: " + silence.getId()), HttpStatus.OK);
+            } else {
+                log.warn("Error saving silence: "+response.getStatusLine());
+                log.debug(newJson);
+                return new ResponseEntity<>(new ServiceResponse<>("Error saving silence"), HttpStatus.valueOf(response.getStatusLine().getStatusCode()));
+            }
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @DeleteMapping(value = "/deleteSilence")
+    public ResponseEntity<ServiceResponse<Void>> deleteSilence(@RequestParam(value = "id")String id) {
+        try {
+
+            HttpClient http = new DefaultHttpClient();
+            HttpDelete delete = new HttpDelete(env.getProperty("alertmanager.silence.url")+"/"+id);
+            HttpResponse response = http.execute(delete);
+
+            if (response.getStatusLine().getStatusCode() == 200) {
+                state.removeSilence(id);
+                return new ResponseEntity<>(new ServiceResponse<>("Record deleted"), HttpStatus.OK);
+            } else {
+                return new ResponseEntity<>(new ServiceResponse<>("Failed to delete "+id), HttpStatus.NOT_FOUND);
+            }
+
         } catch (Exception e) {
             log.error(e.getMessage(), e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);

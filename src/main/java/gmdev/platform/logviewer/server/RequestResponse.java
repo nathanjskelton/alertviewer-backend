@@ -1,20 +1,25 @@
 package gmdev.platform.logviewer.server;
 
 import gmdev.platform.logviewer.data.AlertManagerEntry;
+import gmdev.platform.logviewer.data.silence.Silence;
 
+import java.util.Collection;
 import java.util.List;
 
 public class RequestResponse {
 
     private boolean export;
     private List<AlertManagerEntry> entries;
+
+    private Collection<Silence> silences;
+
     private StringBuilder content;
 
     private List<String> instances;
 
     private List<String> severities;
 
-    public RequestResponse(List<AlertManagerEntry> list, List<String> instances,
+    public RequestResponse(List<AlertManagerEntry> list, Collection<Silence> silences, List<String> instances,
                            List<String> severities, boolean export) {
         this.export = export;
         content = new StringBuilder();
@@ -27,6 +32,7 @@ public class RequestResponse {
         }
         this.instances = instances;
         this.severities = severities;
+        this.silences = silences;
     }
 
     private void addEntry(AlertManagerEntry entry) {
@@ -65,5 +71,9 @@ public class RequestResponse {
 
     public List<String> getSeverities() {
         return severities;
+    }
+
+    public Collection<Silence> getSilences() {
+        return silences;
     }
 }
