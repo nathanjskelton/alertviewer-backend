@@ -1,10 +1,13 @@
 package gmdev.platform.logviewer.data;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 public class Note implements Comparable<Note> {
 
     private LocalDateTime timestamp;
+
+    private String friendlyTime;
     private String user;
     private String message;
 
@@ -12,10 +15,16 @@ public class Note implements Comparable<Note> {
         this.timestamp = timestamp;
         this.user = user;
         this.message = message;
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
+        friendlyTime = timestamp.format(dtf);
     }
 
     public LocalDateTime getTimestamp() {
         return timestamp;
+    }
+
+    public String getFriendlyTime() {
+        return friendlyTime;
     }
 
     public void setTimestamp(LocalDateTime timestamp) {

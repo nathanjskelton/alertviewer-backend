@@ -1,25 +1,38 @@
 package gmdev.platform.logviewer.server;
 
 import gmdev.platform.logviewer.data.AlertManagerEntry;
+import gmdev.platform.logviewer.data.silence.Silence;
 
+import java.util.Collection;
 import java.util.List;
 
 public class RequestResponse {
 
     private boolean export;
     private List<AlertManagerEntry> entries;
+
+    private Collection<Silence> silences;
+
     private StringBuilder content;
 
-    public RequestResponse(List<AlertManagerEntry> list, boolean export) {
+    private List<String> instances;
+
+    private List<String> severities;
+
+    public RequestResponse(List<AlertManagerEntry> list, Collection<Silence> silences, List<String> instances,
+                           List<String> severities, boolean export) {
         this.export = export;
+        content = new StringBuilder();
         if (export) {
-            content = new StringBuilder();
             for (AlertManagerEntry entry:list) {
                 addEntry(entry);
             }
         } else {
             entries =list;
         }
+        this.instances = instances;
+        this.severities = severities;
+        this.silences = silences;
     }
 
     private void addEntry(AlertManagerEntry entry) {
@@ -50,5 +63,17 @@ public class RequestResponse {
 
     public boolean isExport() {
         return export;
+    }
+
+    public List<String> getInstances() {
+        return instances;
+    }
+
+    public List<String> getSeverities() {
+        return severities;
+    }
+
+    public Collection<Silence> getSilences() {
+        return silences;
     }
 }

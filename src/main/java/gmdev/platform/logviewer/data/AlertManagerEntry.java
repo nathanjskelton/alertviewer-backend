@@ -1,16 +1,14 @@
 package gmdev.platform.logviewer.data;
 
+import gmdev.platform.logviewer.data.alert.Alert;
 import gmdev.platform.logviewer.util.LogEntryStatus;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.annotation.Transient;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.Temporal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -62,7 +60,7 @@ public class AlertManagerEntry {
 
     public void setAlert(Alert alert) {
         if (!alert.getFingerprint().equals(this.id)) {throw new RuntimeException("Fingerprint mismatch:\n"+
-                this.id+">>>\n"+this.alert.toString()+"\n\n"+alert.fingerprint+">>>\n"+alert.toString());}
+                this.id+">>>\n"+this.alert.toString()+"\n\n"+alert.getFingerprint()+">>>\n"+alert.toString());}
         this.alert = alert;
     }
 

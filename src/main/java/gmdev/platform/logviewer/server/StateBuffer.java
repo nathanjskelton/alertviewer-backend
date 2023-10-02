@@ -1,5 +1,6 @@
 package gmdev.platform.logviewer.server;
 
+import gmdev.platform.logviewer.data.silence.Silence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -19,6 +20,8 @@ public class StateBuffer {
     private Map<String, List<Alert>> messageStack = new HashMap<>();
     private Map<String, Boolean> stale = new HashMap<>();
     private Map<String, Long> sessions = new HashMap<>();
+
+    private final Set<Silence> silences = new HashSet<>();
 
     public boolean aquireLock() {
         synchronized (lock) {
@@ -142,4 +145,29 @@ public class StateBuffer {
         return new PollResult(sessionId, getMessageStack(sessionId), getStatusMessage(), isStale(sessionId), isLock());
     }
 
+    public Collection<Silence> getSilences() {
+        synchronized (this.silences) {
+            return silences;
+        }
+    }
+
+    public void setSilences(List<Silence> silences) {
+        synchronized (this.silences) {
+            this.silences.clear();
+            this.silences.addAll(silences);
+        }
+    }
+
+    public void removeSilence(String id) {
+        synchronized (this.silences) {
+            silences.removeIf(s -> id.equals(s.getId()));
+        }
+    }
+
+    public void addSilence(Silence silence) {
+        synchronized (this.silences) {
+            silences.remove(silence);
+            silences.add(silence);
+        }
+    }
 }

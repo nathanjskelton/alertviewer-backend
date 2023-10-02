@@ -1,5 +1,6 @@
 package gmdev.platform.logviewer.server;
 
+import com.mongodb.client.DistinctIterable;
 import gmdev.platform.logviewer.data.AlertManagerEntry;
 import gmdev.platform.logviewer.data.Occurence;
 import gmdev.platform.logviewer.util.LogEntryStatus;
@@ -17,6 +18,8 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 @Component
 public class RequestService {
@@ -25,7 +28,8 @@ public class RequestService {
     @Autowired MongoTemplate mongo;
     @Autowired Environment env;
 
-
+    @Autowired
+    StateBuffer state;
 
 
     public RequestResponse request(List<String> severity, String start, String end,
@@ -61,6 +65,9 @@ public class RequestService {
         }
 
         log.debug("startDate="+startDate+", endDate="+endDate);
+
+        DistinctIterable<String> instances = mongo.getCollection("AlertManagerEntry").distinct("alert.labels.gm_instance", String.class);
+        DistinctIterable<String> severities = mongo.getCollection("AlertManagerEntry").distinct("alert.labels.severity", String.class);
 
         Query query = new Query();
         //if (startDate == null) startDate = LocalDateTime.now().minusDays(1);
@@ -128,6 +135,10 @@ public class RequestService {
         log.debug("QUERY: "+query.toString());
         List<AlertManagerEntry> list = mongo.find(query, AlertManagerEntry.class);
 
-        return new RequestResponse(list, export);
+        List<String> inst = StreamSupport.stream(instances.spliterator(), false)
+            .collect(Collectors.toList());
+        List<String> seve = StreamSupport.stream(severities.spliterator(), false)
+                .collect(Collectors.toList());
+        return new RequestResponse(list, state.getSilences(), inst, seve, export);
     }
 }
