@@ -6,8 +6,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import gmdev.platform.logviewer.data.AlertManagerEntry;
 import gmdev.platform.logviewer.data.AlertManagerRepo;
 import gmdev.platform.logviewer.data.RegexRepo;
+import gmdev.platform.logviewer.data.jira.WraithGeneric;
 import gmdev.platform.logviewer.data.silence.Silence;
-import gmdev.platform.logviewer.ingest.alertmananer.AlertIngester;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpDelete;
@@ -26,8 +26,6 @@ import org.springframework.web.bind.annotation.*;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.time.LocalDateTime;
-import java.util.Calendar;
-import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -262,6 +260,35 @@ public class RestEndpoint {
                 log.warn("Error saving silence: "+response.getStatusLine());
                 log.debug(newJson);
                 return new ResponseEntity<>(new ServiceResponse<>("Error saving silence"), HttpStatus.valueOf(response.getStatusLine().getStatusCode()));
+            }
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @PostMapping(value = "/jira", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ServiceResponse<Void>> jira(@RequestBody String payload) {
+        try {
+            log.debug("SAVE JIRA: "+payload);
+            ObjectMapper objectMapper = new ObjectMapper();
+            objectMapper.registerModule(new JavaTimeModule());
+            WraithGeneric jira = objectMapper.readValue(payload, WraithGeneric.class);
+
+            String newJson = objectMapper.writeValueAsString(jira);
+            HttpClient http = new DefaultHttpClient();
+            HttpPost post = new HttpPost(env.getProperty("wraith.generic.url"));
+            post.setHeader("Content-Type", "application/json");
+            log.debug("Submitting JSON to Jira: "+newJson);
+            post.setEntity(new StringEntity(newJson));
+            HttpResponse response = http.execute(post);
+
+            if (response.getStatusLine().getStatusCode()==200) {
+                return new ResponseEntity<>(new ServiceResponse<>("Jira added: " + jira.getId()), HttpStatus.OK);
+            } else {
+                log.warn("Error submitting to jira: "+response.getStatusLine());
+                log.debug(newJson);
+                return new ResponseEntity<>(new ServiceResponse<>("Error submitting to jira"), HttpStatus.valueOf(response.getStatusLine().getStatusCode()));
             }
         } catch (Exception e) {
             log.error(e.getMessage(), e);
