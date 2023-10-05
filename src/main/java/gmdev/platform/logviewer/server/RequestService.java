@@ -85,6 +85,8 @@ public class RequestService {
         Criteria resolvedCriteria = Criteria.where("status").is(LogEntryStatus.RESOLVED);
         if (statusEnums.contains(LogEntryStatus.RESOLVED)) criteriaOrList.add(resolvedCriteria);
 
+        Criteria silencedCriteria = Criteria.where("status").is(LogEntryStatus.SILENCED);
+        if (statusEnums.contains(LogEntryStatus.SILENCED)) criteriaOrList.add(silencedCriteria);
 
         //combine the appropriate criteria based on selected statuses
         Criteria criteria = new Criteria();

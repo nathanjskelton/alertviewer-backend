@@ -1,5 +1,5 @@
 package gmdev.platform.logviewer.util;
 
 public enum LogEntryStatus {
-    NEW, ACKED, RESOLVED
+    NEW, ACKED, RESOLVED, SILENCED
 }

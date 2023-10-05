@@ -109,23 +109,33 @@ public class AlertIngester implements Ingester {
                 ObjectMapper objectMapper = new ObjectMapper();
                 objectMapper.registerModule(new JavaTimeModule());
                 objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-                Alert alert = objectMapper.readValue(jsonAlert, Alert.class);
-                Optional<AlertManagerEntry> entryOpt = repo.findById(alert.getFingerprint());
-                AlertManagerEntry entry;
-                if (entryOpt.isPresent()) {
-                    entry = entryOpt.get();
-                    entry.setAlert(alert);
-                    if (LogEntryStatus.RESOLVED.equals(entry.getStatus())) {
-                        entry.addNote("System", "Previously RESOLVED alert is now NEW");
-                        entry.setStatus(LogEntryStatus.NEW);
+                Alert alertFromAlertmanager = objectMapper.readValue(jsonAlert, Alert.class);
+                Optional<AlertManagerEntry> alertFromDatabase = repo.findById(alertFromAlertmanager.getFingerprint());
+                AlertManagerEntry databaseEntry;
+                if (alertFromDatabase.isPresent()) {
+                    databaseEntry = alertFromDatabase.get();
+                    databaseEntry.setAlert(alertFromAlertmanager);
+                    if (LogEntryStatus.RESOLVED.equals(databaseEntry.getStatus())) {
+                        databaseEntry.addNote("System", "Previously RESOLVED alert is now NEW");
+                        databaseEntry.setStatus(LogEntryStatus.NEW);
                     }
-                    allActive.remove(entry);
-                } else {
-                    entry = new AlertManagerEntry(alert);
-                }
-                repo.save(entry);
+                    if ("suppressed".equals(alertFromAlertmanager.getStatus().getState())) {
+                        if (!LogEntryStatus.SILENCED.equals(databaseEntry.getStatus())) {
+                            databaseEntry.addNote("System", "Alert is SILENCED");
+                            databaseEntry.setStatus(LogEntryStatus.SILENCED);
+                        }
+                    } else if (LogEntryStatus.SILENCED.equals(databaseEntry.getStatus())) {
+                        if (!"suppressed".equals(alertFromAlertmanager.getStatus().getState())) {
+                            databaseEntry.addNote("System", "Previously SILENCED alert is now NEW");
+                            databaseEntry.setStatus(LogEntryStatus.NEW);
+                        }
+                    }
 
-                //log.debug(entry.toString());
+                    allActive.remove(databaseEntry);
+                } else {
+                    databaseEntry = new AlertManagerEntry(alertFromAlertmanager);
+                }
+                repo.save(databaseEntry);
             }
 
             //process existing alerts that are not existing

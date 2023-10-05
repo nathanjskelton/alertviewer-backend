@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -46,6 +47,20 @@ public class RestEndpoint {
     @Autowired
     Environment env;
 
+    @GetMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ServiceResponse<RequestResponse>> login(@RequestHeader("CORTANA_DN") String dn) {
+        try {
+            log.debug("LOGIN: "+dn);
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.set("CORTANA_TOKEN",
+                    "token:"+dn);
+
+            return new ResponseEntity("login successful", responseHeaders, HttpStatus.OK);
+        } catch (Exception e) {
+            log.error("Login error: "+e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.UNAUTHORIZED);
+        }
+    }
 
     @GetMapping(value = "/export", produces = MediaType.TEXT_PLAIN_VALUE)
     public String export(@RequestParam(required = false,value = "severity")List<String> severity,
@@ -73,6 +88,7 @@ public class RestEndpoint {
                                                                             @RequestParam(required = false,value = "gminstances")List<String> gminstances) {
 
         try {
+            log.debug("Query: statuses="+statuses);
             return new ResponseEntity<>(new ServiceResponse<>("Query complete", requestService.request(severity, start, end, statuses, gminstances, false)), HttpStatus.OK);
         } catch (ServiceException e) {
             log.error("Request error: "+e.getMessage(), e);
@@ -255,7 +271,7 @@ public class RestEndpoint {
 
             if (response.getStatusLine().getStatusCode()==200) {
                 state.addSilence(silence);
-                return new ResponseEntity<>(new ServiceResponse<>("Silence added: " + silence.getId()), HttpStatus.OK);
+                return new ResponseEntity<>(new ServiceResponse<>("Silence added"), HttpStatus.OK);
             } else {
                 log.warn("Error saving silence: "+response.getStatusLine());
                 log.debug(newJson);
@@ -284,7 +300,7 @@ public class RestEndpoint {
             HttpResponse response = http.execute(post);
 
             if (response.getStatusLine().getStatusCode()==200) {
-                return new ResponseEntity<>(new ServiceResponse<>("Jira added: " + jira.getId()), HttpStatus.OK);
+                return new ResponseEntity<>(new ServiceResponse<>("Jira added with label " + jira.getId()), HttpStatus.OK);
             } else {
                 log.warn("Error submitting to jira: "+response.getStatusLine());
                 log.debug(newJson);
