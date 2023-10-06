@@ -24,12 +24,13 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.xml.bind.DatatypeConverter;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
+import java.util.UUID;
 
 @RestController
 public class RestEndpoint {
@@ -51,10 +52,10 @@ public class RestEndpoint {
     public ResponseEntity<ServiceResponse<RequestResponse>> login(@RequestHeader("CORTANA_DN") String dn) {
         try {
             log.debug("LOGIN: "+dn);
-            HttpHeaders responseHeaders = new HttpHeaders();
-            responseHeaders.set("CORTANA_TOKEN",
-                    "token:"+dn);
 
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setAccessControlExposeHeaders(List.of("Cortana_token"));
+            responseHeaders.set("CORTANA_TOKEN", state.registerSession(dn));
             return new ResponseEntity("login successful", responseHeaders, HttpStatus.OK);
         } catch (Exception e) {
             log.error("Login error: "+e.getMessage(), e);
@@ -63,12 +64,18 @@ public class RestEndpoint {
     }
 
     @GetMapping(value = "/export", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String export(@RequestParam(required = false,value = "severity")List<String> severity,
+    public String export(@RequestHeader("CORTANA_TOKEN") String token,
+                          @RequestParam(required = false,value = "severity")List<String> severity,
                           @RequestParam(required = false,value = "start")String start,
                           @RequestParam(required = false,value = "end")String end,
                           @RequestParam(required = false,value = "statuses")List<String> statuses,
                           @RequestParam(required = false,value = "gminstances")List<String> gminstances,
                           HttpServletResponse response) {
+
+        if (!state.isValidSession(token)) {
+            log.info("Unauthorized endpoint access: export");
+            return "Unauthorized, please login";
+        }
 
         response.setHeader("Content-Disposition", "attachment; filename=export.txt");
         try {
@@ -81,13 +88,18 @@ public class RestEndpoint {
 
 
     @GetMapping(value = "/request", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<RequestResponse>> request(@RequestParam(required = false,value = "severity")List<String> severity,
-                                                                            @RequestParam(required = false,value = "start")String start,
-                                                                            @RequestParam(required = false,value = "end")String end,
-                                                                            @RequestParam(required = false,value = "statuses")List<String> statuses,
-                                                                            @RequestParam(required = false,value = "gminstances")List<String> gminstances) {
+    public ResponseEntity<ServiceResponse<RequestResponse>> request(@RequestHeader("CORTANA_TOKEN") String token,
+                                    @RequestParam(required = false,value = "severity")List<String> severity,
+                                    @RequestParam(required = false,value = "start")String start,
+                                    @RequestParam(required = false,value = "end")String end,
+                                    @RequestParam(required = false,value = "statuses")List<String> statuses,
+                                    @RequestParam(required = false,value = "gminstances")List<String> gminstances) {
 
         try {
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: request");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
             log.debug("Query: statuses="+statuses);
             return new ResponseEntity<>(new ServiceResponse<>("Query complete", requestService.request(severity, start, end, statuses, gminstances, false)), HttpStatus.OK);
         } catch (ServiceException e) {
@@ -98,8 +110,14 @@ public class RestEndpoint {
 
 
     @PutMapping("/mark")
-    public ResponseEntity<ServiceResponse<Void>> mark(@RequestParam(value = "id")String id, @RequestParam(value = "status")String status) {
+    public ResponseEntity<ServiceResponse<Void>> mark(@RequestHeader("CORTANA_TOKEN") String token,
+                      @RequestParam(value = "id")String id,
+                      @RequestParam(value = "status")String status) {
         try {
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: mark");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
             markService.mark(id, status);
             addNote(id, "system", "Status set to "+status);
             return new ResponseEntity<>(new ServiceResponse<>("Record "+id+" marked as "+status), HttpStatus.OK);
@@ -109,95 +127,30 @@ public class RestEndpoint {
     }
 
 
-    @PutMapping("/team")
-    public ResponseEntity<ServiceResponse<Void>> setTeams(@RequestParam(value = "id")String id, @RequestParam(value = "teams")List<String> teams) {
-        try {
-            markService.teams(id, teams);
-            addNote(id, "system", "Teams set to "+teams);
-            return new ResponseEntity<>(new ServiceResponse<>("Record "+id+" teams set to  "+teams), HttpStatus.OK);
-        } catch (Exception e) {
-            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    @GetMapping(value = "/suggestCombine", produces = MediaType.TEXT_PLAIN_VALUE)
-    public ResponseEntity<String> suggestCombine(@RequestParam(value = "ids")List<String> ids) {
-        try {
-            CombineSuggestion suggestion = (combineService.suggestCombine(ids));
-            if (suggestion.getExistingId() != null) {
-                log.debug("Matching REGEX already exists, use merge: "+ suggestion.getSuggestion());
-                return new ResponseEntity<>("Matching REGEX already exists, use merge:"+ suggestion.getSuggestion(), HttpStatus.BAD_REQUEST);
-            }
-            log.debug("REGEX from controller: "+suggestion);
-            return new ResponseEntity<>(suggestion.getSuggestion(), HttpStatus.OK);
-        } catch (ServiceException e) {
-            return new ResponseEntity<>(e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    @PostMapping(value = "/applyCombine", consumes = MediaType.TEXT_PLAIN_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> applyCombine(@RequestParam(value = "ids")List<String> ids, @RequestBody String regex) {
-        try {
-
-            combineService.applyCombine(ids, regex);
-
-            return new ResponseEntity<>(new ServiceResponse<>("Apply complete, records combined"), HttpStatus.OK);
-        } catch (ServiceException e) {
-            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    @PutMapping("/merge")
-    public ResponseEntity<ServiceResponse<Void>> merge(@RequestParam(value = "ids")List<String> ids) {
-        try {
-            int count = combineService.merge(ids);
-            return new ResponseEntity<>(new ServiceResponse<>("Merged "+count+" records"), HttpStatus.OK);
-        } catch (ServiceException e) {
-            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
 
     @GetMapping("/poll")
-    public ResponseEntity<ServiceResponse<PollResult>> poll(@RequestParam(value = "sessionId")String sessionId, HttpServletRequest request) {
+    public ResponseEntity<ServiceResponse<PollResult>> poll(@RequestHeader("CORTANA_TOKEN") String token) {
         try {
-            if (sessionId == null || sessionId.isEmpty() || sessionId.equals("null")) {
-                sessionId = request.getSession().getId();
-                log.debug("New session created: "+sessionId);
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: poll");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
-            PollResult pr = state.poll(sessionId);
+            PollResult pr = state.poll(token);
             return new ResponseEntity<>(new ServiceResponse<>("Poll complete", pr), HttpStatus.OK);
         } catch (ServiceException e) {
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
-    @PutMapping("/mergeAll")
-    public ResponseEntity<ServiceResponse<Void>> mergeAll() {
-        try {
-            CompletableFuture<String> future = mergeAllAsync.mergeAll();
-            state.addAsync("MergeAll",future);
-            return new ResponseEntity<>(new ServiceResponse<>("Merge all started in background"), HttpStatus.OK);
-        } catch (ServiceException e) {
-            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    @PostMapping(value = "/update", consumes = MediaType.TEXT_PLAIN_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> update(@RequestParam(value = "id")String id, @RequestBody String regex) {
-        try {
-
-            combineService.updateRegex(id, regex);
-
-            return new ResponseEntity<>(new ServiceResponse<>("Update complete"), HttpStatus.OK);
-        } catch (ServiceException e) {
-            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
 
     @DeleteMapping(value = "/delete")
-    public ResponseEntity<ServiceResponse<Void>> delete(@RequestParam(value = "id")String id) {
+    public ResponseEntity<ServiceResponse<Void>> delete(@RequestHeader("CORTANA_TOKEN") String token,
+                                                        @RequestParam(value = "id")String id) {
         try {
-
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: delete");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
             logRepo.deleteById(id);
             regexRepo.deleteByLogEntryId(id);
 
@@ -208,30 +161,15 @@ public class RestEndpoint {
         }
     }
 
-    @PutMapping(value = "/resetCount")
-    public ResponseEntity<ServiceResponse<Void>> resetCount(@RequestParam(value = "id")String id) {
-        try {
-
-            Optional<AlertManagerEntry> o = logRepo.findById(id);
-            if (o.isPresent()) {
-                AlertManagerEntry le = o.get();
-                //le.setTotalOccurences(0);
-                le.addNote("user", "Count reset");
-                logRepo.save(le);
-                return new ResponseEntity<>(new ServiceResponse<>("Record count reset"), HttpStatus.OK);
-            }
-            return new ResponseEntity<>(new ServiceResponse<>("Record not found"), HttpStatus.BAD_REQUEST);
-        } catch (Exception e) {
-            log.error(e.getMessage(), e);
-            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
 
     @PostMapping(value = "/note", consumes = MediaType.TEXT_PLAIN_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> note(@RequestParam(value = "id")String id, @RequestBody String note) {
+    public ResponseEntity<ServiceResponse<Void>> note(@RequestHeader("CORTANA_TOKEN") String token,
+                                                      @RequestParam(value = "id")String id, @RequestBody String note) {
         try {
-
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: note");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
             boolean added = addNote(id, "user", note);
             if (added) {
                 return new ResponseEntity<>(new ServiceResponse<>("Note added"), HttpStatus.OK);
@@ -245,8 +183,13 @@ public class RestEndpoint {
     }
 
     @PostMapping(value = "/silence", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> silence(@RequestBody String payload) {
+    public ResponseEntity<ServiceResponse<Void>> silence(@RequestHeader("CORTANA_TOKEN") String token,
+                                                         @RequestBody String payload) {
         try {
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: silence");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
             log.debug("SAVE SILENCE: "+payload);
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.registerModule(new JavaTimeModule());
@@ -284,8 +227,13 @@ public class RestEndpoint {
     }
 
     @PostMapping(value = "/jira", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> jira(@RequestBody String payload) {
+    public ResponseEntity<ServiceResponse<Void>> jira(@RequestHeader("CORTANA_TOKEN") String token,
+                                                      @RequestBody String payload) {
         try {
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: jira");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
             log.debug("SAVE JIRA: "+payload);
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.registerModule(new JavaTimeModule());
@@ -313,9 +261,13 @@ public class RestEndpoint {
     }
 
     @DeleteMapping(value = "/deleteSilence")
-    public ResponseEntity<ServiceResponse<Void>> deleteSilence(@RequestParam(value = "id")String id) {
+    public ResponseEntity<ServiceResponse<Void>> deleteSilence(@RequestHeader("CORTANA_TOKEN") String token,
+                                                               @RequestParam(value = "id")String id) {
         try {
-
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: deleteSilence");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
             HttpClient http = new DefaultHttpClient();
             HttpDelete delete = new HttpDelete(env.getProperty("alertmanager.silence.url")+"/"+id);
             HttpResponse response = http.execute(delete);
