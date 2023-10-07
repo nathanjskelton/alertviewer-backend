@@ -4,8 +4,13 @@ import gmdev.platform.logviewer.data.silence.Silence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
+import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Component;
 
+import javax.xml.bind.DatatypeConverter;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
@@ -13,18 +18,18 @@ import java.util.concurrent.CompletableFuture;
 public class StateBuffer {
     private static final Logger log = LoggerFactory.getLogger(StateBuffer.class);
 
-    private Object MUTEX = new Object();
+    private final Object MUTEX = new Object();
     private Long lock = 0L;
-    private Map<String, CompletableFuture<String>> asyncs = new HashMap<>();
-    private List<String> jobsInProgress = new ArrayList<>();
-    private Map<String, List<Alert>> messageStack = new HashMap<>();
-    private Map<String, Boolean> stale = new HashMap<>();
-    private Map<String, Long> sessions = new HashMap<>();
+    private final Map<String, CompletableFuture<String>> asyncs = new HashMap<>();
+    private final List<String> jobsInProgress = new ArrayList<>();
+    private final Map<String, List<Alert>> messageStack = new HashMap<>();
+    private final Map<String, Boolean> stale = new HashMap<>();
+    private final Map<String, Long> sessions = new HashMap<>();
 
     private final Set<Silence> silences = new HashSet<>();
 
     public boolean aquireLock() {
-        synchronized (lock) {
+        synchronized (MUTEX) {
             if (lock > 0) {
                 return false;
             }
@@ -34,7 +39,7 @@ public class StateBuffer {
     }
 
     public void releaseLock() {
-        synchronized (lock) {
+        synchronized (MUTEX) {
             lock = 0L;
         }
 
@@ -50,15 +55,15 @@ public class StateBuffer {
         synchronized (MUTEX) {
             //jobs
             jobsInProgress.clear();
-            for (Iterator<Map.Entry<String, CompletableFuture<String>>> i = asyncs.entrySet().iterator(); i.hasNext() ;) {
-                Map.Entry<String, CompletableFuture<String>> entry =  i.next();
+            for (Iterator<Map.Entry<String, CompletableFuture<String>>> i = asyncs.entrySet().iterator(); i.hasNext(); ) {
+                Map.Entry<String, CompletableFuture<String>> entry = i.next();
                 if (entry.getValue().isDone()) {
                     try {
-                        addMessage(new Alert("success", entry.getKey() + " finished: "+ entry.getValue().get()));
+                        addMessage(new Alert("success", entry.getKey() + " finished: " + entry.getValue().get()));
                         setStale();
                         i.remove();
                     } catch (Exception e) {
-                        addMessage(new Alert("error",e.getMessage()));
+                        addMessage(new Alert("error", e.getMessage()));
                         log.error(e.getMessage(), e);
                         i.remove();
                     }
@@ -66,8 +71,9 @@ public class StateBuffer {
                     jobsInProgress.add(entry.getKey());
                 }
             }
+        }
 
-            //sessions
+        synchronized (MUTEX) {
             for(Iterator<Map.Entry<String, Long>> i = sessions.entrySet().iterator();i.hasNext();) {
                 Map.Entry<String, Long> entry = i.next();
                 if (System.currentTimeMillis() - entry.getValue() > 60000) {
@@ -98,6 +104,16 @@ public class StateBuffer {
         }
     }
 
+    public boolean isValidSession(String sessionId) {
+        synchronized (MUTEX) {
+            if (sessions.containsKey(sessionId)) {
+                sessions.put(sessionId, System.currentTimeMillis());
+                return true;
+            }
+            return false;
+        }
+    }
+
     public boolean isLock() {
         return lock > 0;
     }
@@ -105,10 +121,10 @@ public class StateBuffer {
     private String getStatusMessage() {
         String msg;
         synchronized (MUTEX) {
-            if (jobsInProgress.size() == 0) {
-                msg = "Lock["+isLock()+"], Ready.";
+            if (jobsInProgress.isEmpty()) {
+                msg = "Ready.";
             } else {
-                msg = "Lock["+isLock()+"], Running: " + jobsInProgress.toString();
+                msg = "Running: " + jobsInProgress.toString();
             }
         }
         return msg;
@@ -139,10 +155,32 @@ public class StateBuffer {
 
     public PollResult poll(String sessionId) throws ServiceException {
         log.trace("Session " + sessionId + " polling...");
-        synchronized (MUTEX) {
-            sessions.put(sessionId, System.currentTimeMillis());
-        }
         return new PollResult(sessionId, getMessageStack(sessionId), getStatusMessage(), isStale(sessionId), isLock());
+    }
+
+    public String registerSession(String dn) throws AuthenticationException {
+        try {
+            synchronized (MUTEX) {
+                log.info("Session " + dn + " registering...");
+
+                //TODO check dn
+                if (!"test.dn".equals(dn)) {
+                    throw new AuthenticationCredentialsNotFoundException(dn + " is not authorized");
+                }
+
+                MessageDigest md = MessageDigest.getInstance("MD5");
+                md.update(dn.getBytes());
+                byte[] digest = md.digest();
+                String hash = DatatypeConverter.printHexBinary(digest).toUpperCase();
+                String token = "cortana:" + UUID.randomUUID() + ":" + hash;
+
+                sessions.put(token, System.currentTimeMillis());
+                log.info("Session " + dn + " registered...");
+                return token;
+            }
+        } catch(Exception e) {
+            throw new AuthenticationServiceException(e.getMessage());
+        }
     }
 
     public Collection<Silence> getSilences() {
