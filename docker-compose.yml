@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  logviewer:
+    image: logviewer
+    ports: 
+      - 8085:8085
+    volumes:
+      - /etc/pki/tls/certs:/certs
+
