@@ -1,8 +1,8 @@
 version: '3.8'
 
 services:
-  logviewer:
-    image: logviewer
+  aalertviewer-backend:
+    image: alertviewer-backend
     ports: 
       - 8085:8085
     volumes:

@@ -1,13 +1,13 @@
 #!/bin/bash
 
-cd /opt/user/dev/vue/logviewer-ui
+cd /opt/user/dev/vue/alertviewer-ui
 npm run build
-rm -rf /opt/user/dev/logviewer/src/main/resources/public/*
-cp -R dist/* /opt/user/dev/logviewer/src/main/resources/public/
+rm -rf /opt/user/dev/alertviewer-backend/src/main/resources/public/*
+cp -R dist/* /opt/user/dev/alertviewer-backend/src/main/resources/public/
 
-cd /opt/user/dev/logviewer
+cd /opt/user/dev/alertviewer-backend
 mvn clean install
 
-rm ~/home/Nathan/logging/logviewer-1.0-SNAPSHOT.jar 
-cp target/logviewer-1.0-SNAPSHOT.jar ~/home/Nathan/logging
+rm ~/home/Nathan/logging/alertviewer-backend-1.0-SNAPSHOT.jar 
+cp target/alertviewer-backend-1.0-SNAPSHOT.jar ~/home/Nathan/logging
 
