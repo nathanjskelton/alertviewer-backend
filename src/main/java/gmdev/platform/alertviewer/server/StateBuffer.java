@@ -164,7 +164,7 @@ public class StateBuffer {
                 log.info("Session " + dn + " registering...");
 
                 //TODO check dn
-                if (!"test.dn".equals(dn)) {
+                if (!"CN=client1.platforms.gm.evo.org,O=GM,L=Laurel,ST=MD,C=US".equals(dn)) {
                     throw new AuthenticationCredentialsNotFoundException(dn + " is not authorized");
                 }
 
