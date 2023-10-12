@@ -1,8 +1,11 @@
 package gmdev.platform.alertviewer.server;
 
+import gmdev.platform.alertviewer.data.AlertManagerUser;
+import gmdev.platform.alertviewer.data.AlertManagerUserRepo;
 import gmdev.platform.alertviewer.data.silence.Silence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.AuthenticationServiceException;
@@ -24,9 +27,12 @@ public class StateBuffer {
     private final List<String> jobsInProgress = new ArrayList<>();
     private final Map<String, List<Alert>> messageStack = new HashMap<>();
     private final Map<String, Boolean> stale = new HashMap<>();
-    private final Map<String, Long> sessions = new HashMap<>();
+    private final Map<String, Registration> sessions = new HashMap<>();
 
     private final Set<Silence> silences = new HashSet<>();
+
+    @Autowired
+    AlertManagerUserRepo userRepo;
 
     public boolean aquireLock() {
         synchronized (MUTEX) {
@@ -74,9 +80,9 @@ public class StateBuffer {
         }
 
         synchronized (MUTEX) {
-            for(Iterator<Map.Entry<String, Long>> i = sessions.entrySet().iterator();i.hasNext();) {
-                Map.Entry<String, Long> entry = i.next();
-                if (System.currentTimeMillis() - entry.getValue() > 60000) {
+            for(Iterator<Map.Entry<String, Registration>> i = sessions.entrySet().iterator();i.hasNext();) {
+                Map.Entry<String, Registration> entry = i.next();
+                if (System.currentTimeMillis() - entry.getValue().getTimestamp() > 60000) {
                     i.remove();
                     stale.remove(entry.getKey());
                     messageStack.remove(entry.getKey());
@@ -107,8 +113,17 @@ public class StateBuffer {
     public boolean isValidSession(String sessionId) {
         synchronized (MUTEX) {
             if (sessions.containsKey(sessionId)) {
-                sessions.put(sessionId, System.currentTimeMillis());
+                sessions.get(sessionId).update();
                 return true;
+            }
+            return false;
+        }
+    }
+
+    public boolean isAdmin(String sessionId) {
+        synchronized (MUTEX) {
+            if (sessions.containsKey(sessionId)) {
+                return "admin".equals(sessions.get(sessionId).getRole());
             }
             return false;
         }
@@ -158,25 +173,27 @@ public class StateBuffer {
         return new PollResult(sessionId, getMessageStack(sessionId), getStatusMessage(), isStale(sessionId), isLock());
     }
 
-    public String registerSession(String dn) throws AuthenticationException {
+    public Registration registerSession(String dn) throws AuthenticationException {
         try {
             synchronized (MUTEX) {
                 log.info("Session " + dn + " registering...");
 
-                //TODO check dn
-                if (!"CN=client1.platforms.gm.evo.org,O=GM,L=Laurel,ST=MD,C=US".equals(dn)) {
+                AlertManagerUser user = userRepo.findByDn(dn);
+                if (user != null) {
+                    MessageDigest md = MessageDigest.getInstance("MD5");
+                    md.update(dn.getBytes());
+                    byte[] digest = md.digest();
+                    String hash = DatatypeConverter.printHexBinary(digest).toUpperCase();
+                    String token = "cortana:" + UUID.randomUUID() + ":" + hash;
+
+                    Registration reg = new Registration(user, token);
+                    sessions.put(token, reg);
+                    log.info("Session " + dn + " registered...");
+
+                    return reg;
+                } else {
                     throw new AuthenticationCredentialsNotFoundException(dn + " is not authorized");
                 }
-
-                MessageDigest md = MessageDigest.getInstance("MD5");
-                md.update(dn.getBytes());
-                byte[] digest = md.digest();
-                String hash = DatatypeConverter.printHexBinary(digest).toUpperCase();
-                String token = "cortana:" + UUID.randomUUID() + ":" + hash;
-
-                sessions.put(token, System.currentTimeMillis());
-                log.info("Session " + dn + " registered...");
-                return token;
             }
         } catch(Exception e) {
             throw new AuthenticationServiceException(e.getMessage());

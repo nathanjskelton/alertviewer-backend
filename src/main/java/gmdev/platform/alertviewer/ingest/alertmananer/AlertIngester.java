@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import gmdev.platform.alertviewer.data.AlertManagerRepo;
+import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.data.MetaDataHelper;
 import gmdev.platform.alertviewer.ingest.EntryProcessor;
 import gmdev.platform.alertviewer.ingest.Ingester;
@@ -52,7 +52,7 @@ public class AlertIngester implements Ingester {
     EntryProcessor processor;
 
     @Autowired
-    AlertManagerRepo repo;
+    AlertManagerEntryRepo repo;
 
     @Autowired
     StateBuffer state;

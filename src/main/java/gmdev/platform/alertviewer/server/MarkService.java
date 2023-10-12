@@ -1,6 +1,6 @@
 package gmdev.platform.alertviewer.server;
 
-import gmdev.platform.alertviewer.data.AlertManagerRepo;
+import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
 import gmdev.platform.alertviewer.util.LogEntryTeam;
 import gmdev.platform.alertviewer.data.AlertManagerEntry;
@@ -18,7 +18,7 @@ public class MarkService {
 
     private static final Logger log = LoggerFactory.getLogger(MarkService.class);
     @Autowired
-    AlertManagerRepo repo;
+    AlertManagerEntryRepo repo;
 
     public void mark(String id, String status) throws ServiceException {
         LogEntryStatus ls = LogEntryStatus.valueOf(status);

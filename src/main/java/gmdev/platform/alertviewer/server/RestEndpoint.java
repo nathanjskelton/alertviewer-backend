@@ -3,9 +3,9 @@ package gmdev.platform.alertviewer.server;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import gmdev.platform.alertviewer.data.AlertManagerRepo;
-import gmdev.platform.alertviewer.data.RegexRepo;
 import gmdev.platform.alertviewer.data.AlertManagerEntry;
+import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
+import gmdev.platform.alertviewer.data.AlertManagerUser;
 import gmdev.platform.alertviewer.data.jira.WraithGeneric;
 import gmdev.platform.alertviewer.data.silence.Silence;
 import org.apache.http.HttpResponse;
@@ -34,14 +34,11 @@ public class RestEndpoint {
     private static final Logger log = LoggerFactory.getLogger(RestEndpoint.class);
 
     @Autowired RequestService requestService;
+    @Autowired UserService userService;
     @Autowired MarkService markService;
-    @Autowired CombineService combineService;
     @Autowired StateBuffer state;
-    @Autowired MergeAllAsync mergeAllAsync;
     @Autowired
-    AlertManagerRepo logRepo;
-    @Autowired
-    RegexRepo regexRepo;
+    AlertManagerEntryRepo logRepo;
     @Autowired
     Environment env;
 
@@ -51,8 +48,11 @@ public class RestEndpoint {
             log.debug("LOGIN: "+dn);
 
             HttpHeaders responseHeaders = new HttpHeaders();
-            responseHeaders.setAccessControlExposeHeaders(List.of("Cortana_token"));
-            responseHeaders.set("CORTANA_TOKEN", state.registerSession(dn));
+            responseHeaders.setAccessControlExposeHeaders(List.of("Cortana_token", "Cortana_user", "Cortana_role"));
+            Registration reg = state.registerSession(dn);
+            responseHeaders.set("CORTANA_TOKEN", reg.getToken());
+            responseHeaders.set("CORTANA_USER", reg.getUser());
+            responseHeaders.set("CORTANA_ROLE", reg.getRole());
             return new ResponseEntity("login successful", responseHeaders, HttpStatus.OK);
         } catch (Exception e) {
             log.error("Login error: "+e.getMessage(), e);
@@ -105,13 +105,49 @@ public class RestEndpoint {
         }
     }
 
+    @GetMapping(value = "/users", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ServiceResponse<UsersResponse>> users(@RequestHeader("CORTANA_TOKEN") String token) {
+
+        try {
+            if (!state.isAdmin(token)) {
+                log.info("Unauthorized endpoint access: users");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
+
+            return new ResponseEntity<>(new ServiceResponse<>("Query complete", userService.getUsers()), HttpStatus.OK);
+        } catch (ServiceException e) {
+            log.error("Users error: "+e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @PostMapping(value = "/user", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ServiceResponse<Void>> saveUser(@RequestHeader("CORTANA_TOKEN") String token,
+                                                      @RequestBody AlertManagerUser user) {
+        if (!state.isAdmin(token)) {
+            log.info("Unauthorized endpoint access: save user");
+            return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+        }
+        userService.saveUser(user);
+        return new ResponseEntity<>(new ServiceResponse<>("User added"), HttpStatus.OK);
+    }
+    @DeleteMapping(value = "/user")
+    public ResponseEntity<ServiceResponse<Void>> deleteUser(@RequestHeader("CORTANA_TOKEN") String token,
+                                                               @RequestParam(value = "id")String id) {
+        if (!state.isAdmin(token)) {
+            log.info("Unauthorized endpoint access: delete user");
+            return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+        }
+        userService.deleteUser(id);
+        return new ResponseEntity<>(new ServiceResponse<>("User deleted"), HttpStatus.OK);
+    }
 
     @PutMapping("/mark")
     public ResponseEntity<ServiceResponse<Void>> mark(@RequestHeader("CORTANA_TOKEN") String token,
                       @RequestParam(value = "id")String id,
                       @RequestParam(value = "status")String status) {
         try {
-            if (!state.isValidSession(token)) {
+            if (!state.isAdmin(token)) {
                 log.info("Unauthorized endpoint access: mark");
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
@@ -144,12 +180,11 @@ public class RestEndpoint {
     public ResponseEntity<ServiceResponse<Void>> delete(@RequestHeader("CORTANA_TOKEN") String token,
                                                         @RequestParam(value = "id")String id) {
         try {
-            if (!state.isValidSession(token)) {
+            if (!state.isAdmin(token)) {
                 log.info("Unauthorized endpoint access: delete");
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
             logRepo.deleteById(id);
-            regexRepo.deleteByLogEntryId(id);
 
             return new ResponseEntity<>(new ServiceResponse<>("Record deleted"), HttpStatus.OK);
         } catch (Exception e) {
@@ -183,7 +218,7 @@ public class RestEndpoint {
     public ResponseEntity<ServiceResponse<Void>> silence(@RequestHeader("CORTANA_TOKEN") String token,
                                                          @RequestBody String payload) {
         try {
-            if (!state.isValidSession(token)) {
+            if (!state.isAdmin(token)) {
                 log.info("Unauthorized endpoint access: silence");
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
@@ -261,7 +296,7 @@ public class RestEndpoint {
     public ResponseEntity<ServiceResponse<Void>> deleteSilence(@RequestHeader("CORTANA_TOKEN") String token,
                                                                @RequestParam(value = "id")String id) {
         try {
-            if (!state.isValidSession(token)) {
+            if (!state.isAdmin(token)) {
                 log.info("Unauthorized endpoint access: deleteSilence");
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }

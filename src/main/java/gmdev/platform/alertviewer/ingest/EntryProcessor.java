@@ -1,8 +1,7 @@
 package gmdev.platform.alertviewer.ingest;
 
 import gmdev.platform.alertviewer.data.AlertManagerEntry;
-import gmdev.platform.alertviewer.data.AlertManagerRepo;
-import gmdev.platform.alertviewer.data.RegexMatcher;
+import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.metrics.MetricsService;
 import gmdev.platform.alertviewer.server.StateBuffer;
 import org.slf4j.Logger;
@@ -19,13 +18,11 @@ public class EntryProcessor {
     MetricsService metrics;
 
     @Autowired
-    AlertManagerRepo logrepo;
+    AlertManagerEntryRepo logrepo;
 
     @Autowired
     StateBuffer state;
 
-    @Autowired
-    RegexMatcher regexMatcher;
 
     public void processIngestedEntry(IngestedEntry input)  {
         /*

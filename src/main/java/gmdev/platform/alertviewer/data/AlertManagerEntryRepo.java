@@ -4,7 +4,7 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 
 import java.util.List;
 
-public interface AlertManagerRepo extends MongoRepository<AlertManagerEntry, String> {
+public interface AlertManagerEntryRepo extends MongoRepository<AlertManagerEntry, String> {
 
     public List<AlertManagerEntry> findByRegexFalse();
 
