@@ -5,11 +5,14 @@ import gmdev.platform.alertviewer.data.silence.Silence;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 public class RequestResponse {
 
     private boolean export;
     private List<AlertManagerEntry> entries;
+
+    private List<String> alertmanagers;
 
     private Collection<Silence> silences;
 
@@ -20,7 +23,7 @@ public class RequestResponse {
     private List<String> severities;
 
     public RequestResponse(List<AlertManagerEntry> list, Collection<Silence> silences, List<String> instances,
-                           List<String> severities, boolean export) {
+                           List<String> severities, List<String> alertmanagers, boolean export) {
         this.export = export;
         content = new StringBuilder();
         if (export) {
@@ -33,6 +36,7 @@ public class RequestResponse {
         this.instances = instances;
         this.severities = severities;
         this.silences = silences;
+        this.alertmanagers = alertmanagers;
     }
 
     private void addEntry(AlertManagerEntry entry) {
@@ -75,5 +79,9 @@ public class RequestResponse {
 
     public Collection<Silence> getSilences() {
         return silences;
+    }
+
+    public List<String> getAlertmanagers() {
+        return alertmanagers;
     }
 }

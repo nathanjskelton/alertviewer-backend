@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import gmdev.platform.alertviewer.data.AlertManagerConfig;
 import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.data.MetaDataHelper;
 import gmdev.platform.alertviewer.ingest.EntryProcessor;
@@ -32,9 +33,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @Component
 @ConditionalOnProperty(value = "ingester.type", havingValue = "alertmanager")
@@ -59,31 +58,21 @@ public class AlertIngester implements Ingester {
 
     @Override
     public void ingest() {
-        log.info("AlertManager Ingester running");
-
-        HttpClient http = new DefaultHttpClient();
-
-        /*
-        String user = env.getProperty("elastic.user");
-        String password = env.getProperty("elastic.password");
-        if (user != null && !user.isEmpty()) {
-            CredentialsProvider provider = new BasicCredentialsProvider();
-            UsernamePasswordCredentials creds = new UsernamePasswordCredentials(user, password);
-            provider.setCredentials(AuthScope.ANY, creds);
-            try {
-                http = HttpClientBuilder.create().setDefaultCredentialsProvider(provider).build();
-            } catch(Exception e) {
-                log.error("Unable to create http client with credentials");
-            }
+        List<Silence> silences = new ArrayList<>();
+        for (AlertManagerConfig c:state.getAlertmanagers()) {
+            ingest(c);
+            silences.addAll(getSilences(c));
         }
-        */
+        state.setSilences(silences);
+    }
 
-        //HttpGet get = new HttpGet(env.getProperty("elastic.url"));
-        HttpGet get = new HttpGet(env.getProperty("alertmanager.url"));
-        HttpGet get2 = new HttpGet(env.getProperty("alertmanager.silences.url"));
-        //HttpGet get = new HttpGet("http://localhost:9093/api/v1/alerts");
-        //post.addHeader("Content-Type", "application/json");
+    public void ingest(AlertManagerConfig amConfig) {
+        log.info("AlertManager Ingester running for alertmanager "+amConfig.getName());
+
+
         try {
+            HttpClient http = new DefaultHttpClient();
+            HttpGet get = new HttpGet(amConfig.getAlertsUrl());
             HttpResponse response = http.execute(get);
             BufferedReader bR = new BufferedReader(new InputStreamReader(response.getEntity().getContent()));
             String line = "";
@@ -95,7 +84,7 @@ public class AlertIngester implements Ingester {
             JSONObject json = new JSONObject(responseStrBuilder.toString());
             //log.info(json.toString());;
 
-            List<AlertManagerEntry> allActive = repo.findAll();
+            List<AlertManagerEntry> allActiveMinusDatabased = repo.findAll();
 
             //process the incoming active alerts
             JSONArray data = json.getJSONArray("data");
@@ -105,7 +94,7 @@ public class AlertIngester implements Ingester {
                 objectMapper.registerModule(new JavaTimeModule());
                 objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
                 Alert alertFromAlertmanager = objectMapper.readValue(jsonAlert, Alert.class);
-                Optional<AlertManagerEntry> alertFromDatabase = repo.findById(alertFromAlertmanager.getFingerprint());
+                Optional<AlertManagerEntry> alertFromDatabase = repo.findByIdAndAlertmanager(alertFromAlertmanager.getFingerprint(), amConfig.getName());
                 AlertManagerEntry databaseEntry;
                 if (alertFromDatabase.isPresent()) {
                     databaseEntry = alertFromDatabase.get();
@@ -126,16 +115,18 @@ public class AlertIngester implements Ingester {
                         }
                     }
 
-                    allActive.remove(databaseEntry);
+                    allActiveMinusDatabased.remove(databaseEntry);
                 } else {
                     databaseEntry = new AlertManagerEntry(alertFromAlertmanager);
+                    databaseEntry.addNote("System", "New alert imported from "+amConfig.getName());
                 }
+                databaseEntry.setAlertmanager(amConfig.getName());
                 repo.save(databaseEntry);
             }
 
             //process existing alerts that are not existing
-            for (AlertManagerEntry entry:allActive) {
-                if (!LogEntryStatus.RESOLVED.equals(entry.getStatus())) {
+            for (AlertManagerEntry entry:allActiveMinusDatabased) {
+                if (!LogEntryStatus.RESOLVED.equals(entry.getStatus()) && amConfig.getName().equals(entry.getAlertmanager())) {
                     entry.setStatus(LogEntryStatus.RESOLVED);
                     entry.addNote("System", "Alert is now RESOLVED");
                     repo.save(entry);
@@ -144,11 +135,20 @@ public class AlertIngester implements Ingester {
 
             //TODO timeout resolved alerts
 
-            //silences
+        } catch(Exception e) {
+            log.error("Error reading alerts from "+amConfig.getName(), e);
+        }
+    }
 
+
+    public List<Silence> getSilences(AlertManagerConfig amConfig) {
+        List<Silence> existingSilences = new ArrayList<>();
+        try {
+            HttpClient http = new DefaultHttpClient();
+            HttpGet get2 = new HttpGet(amConfig.getSilencesUrl());
+            String line = "";
             HttpResponse response2 = http.execute(get2);
             BufferedReader bR2 = new BufferedReader(new InputStreamReader(response2.getEntity().getContent()));
-            line = "";
 
             StringBuilder responseStrBuilder2 = new StringBuilder();
             while((line =  bR2.readLine()) != null){
@@ -158,7 +158,6 @@ public class AlertIngester implements Ingester {
             //log.debug("SILENCES JSON: "+silencesJson.toString());
 
             JSONArray silences = silencesJson.getJSONArray("data");
-            List<Silence> existingSilences = new ArrayList<>();
             for (int i = 0;i < silences.length();i++) {
                 String jsonSilence = silences.getJSONObject(i).toString();
                 ObjectMapper objectMapper = new ObjectMapper();
@@ -168,22 +167,22 @@ public class AlertIngester implements Ingester {
                 module.addDeserializer(LocalDateTime.class, new CustomDateDeserializer());
                 objectMapper.registerModule(module);
                 Silence silence = objectMapper.readValue(jsonSilence, Silence.class);
+                silence.setAlertmanager(amConfig.getName());
                 if (silence.getStatus().getState().equals("active")) {
                     //set hours based on dates
                     Duration dur = Duration.between(silence.getStartsat(), silence.getEndsat());
                     silence.setHours(dur.toHours());
                     Duration rem = Duration.between(LocalDateTime.now(), silence.getEndsat());
                     silence.setHoursLeft(rem.toHours());
-
                     existingSilences.add(silence);
                 }
             }
-            state.setSilences(existingSilences);
             log.debug("SILENCES ADDED: "+existingSilences.size());
-
         } catch(Exception e) {
-            e.printStackTrace(System.out);
+            log.error("Error reading silences from "+amConfig.getName(), e);
         }
+        return existingSilences;
 
     }
+
 }

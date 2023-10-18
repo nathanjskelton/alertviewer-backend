@@ -69,13 +69,5 @@ public class AlertManagerUser {
         return Objects.hash(id, dn);
     }
 
-    @Override
-    public String toString() {
-        return "AlertManagerUser{" +
-                "id='" + id + '\'' +
-                ", dn='" + dn + '\'' +
-                ", role='" + role + '\'' +
-                ", active=" + active +
-                '}';
-    }
+
 }

@@ -84,7 +84,7 @@ public class RestEndpoint {
     }
 
 
-    @GetMapping(value = "/request", produces = MediaType.APPLICATION_JSON_VALUE)
+    @GetMapping(value = "/alerts", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ServiceResponse<RequestResponse>> request(@RequestHeader("CORTANA_TOKEN") String token,
                                     @RequestParam(required = false,value = "severity")List<String> severity,
                                     @RequestParam(required = false,value = "start")String start,
@@ -152,8 +152,8 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
             markService.mark(id, status);
-            addNote(id, "system", "Status set to "+status);
-            return new ResponseEntity<>(new ServiceResponse<>("Record "+id+" marked as "+status), HttpStatus.OK);
+            addNote(id, state.getUser(token), "Status set to "+status);
+            return new ResponseEntity<>(new ServiceResponse<>("Record "+id+" marked as "+status+" by "+state.getUser(token)), HttpStatus.OK);
         } catch (Exception e) {
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
@@ -176,7 +176,7 @@ public class RestEndpoint {
     }
 
 
-    @DeleteMapping(value = "/delete")
+    @DeleteMapping(value = "/alert")
     public ResponseEntity<ServiceResponse<Void>> delete(@RequestHeader("CORTANA_TOKEN") String token,
                                                         @RequestParam(value = "id")String id) {
         try {
@@ -184,6 +184,7 @@ public class RestEndpoint {
                 log.info("Unauthorized endpoint access: delete");
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
+            log.info("Deleting record: "+id);
             logRepo.deleteById(id);
 
             return new ResponseEntity<>(new ServiceResponse<>("Record deleted"), HttpStatus.OK);
@@ -202,7 +203,7 @@ public class RestEndpoint {
                 log.info("Unauthorized endpoint access: note");
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
-            boolean added = addNote(id, "user", note);
+            boolean added = addNote(id, state.getUser(token), note);
             if (added) {
                 return new ResponseEntity<>(new ServiceResponse<>("Note added"), HttpStatus.OK);
             } else {
@@ -223,10 +224,13 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
             log.debug("SAVE SILENCE: "+payload);
+
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.registerModule(new JavaTimeModule());
             objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
             Silence silence = objectMapper.readValue(payload, Silence.class);
+
+            String silencesUrl = state.getAlertmanager(silence.getAlertmanager()).getSilencesUrl();
 
             //convert hours to dates and set updated
             LocalDateTime dnow = LocalDateTime.now();
@@ -240,7 +244,7 @@ public class RestEndpoint {
             objectMapper2.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
             String newJson = objectMapper2.writeValueAsString(silence);
             HttpClient http = new DefaultHttpClient();
-            HttpPost post = new HttpPost(env.getProperty("alertmanager.silences.url"));
+            HttpPost post = new HttpPost(silencesUrl);
             post.setEntity(new StringEntity(newJson));
             HttpResponse response = http.execute(post);
 
@@ -292,7 +296,7 @@ public class RestEndpoint {
         }
     }
 
-    @DeleteMapping(value = "/deleteSilence")
+    @DeleteMapping(value = "/silence")
     public ResponseEntity<ServiceResponse<Void>> deleteSilence(@RequestHeader("CORTANA_TOKEN") String token,
                                                                @RequestParam(value = "id")String id) {
         try {
@@ -300,14 +304,23 @@ public class RestEndpoint {
                 log.info("Unauthorized endpoint access: deleteSilence");
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
+
+            log.info("Delete silence with id "+id);
+            Silence silence = state.getSilence(id);
+            if (silence==null) {
+                log.error("Unable to locate silence "+id+" in state");
+            }
+            String amName = state.removeSilenceAndGetAlertManager(id);
+            String silenceUrl = state.getAlertmanager(amName).getSilenceUrl();
+
             HttpClient http = new DefaultHttpClient();
-            HttpDelete delete = new HttpDelete(env.getProperty("alertmanager.silence.url")+"/"+id);
+            HttpDelete delete = new HttpDelete(silenceUrl+"/"+id);
             HttpResponse response = http.execute(delete);
 
             if (response.getStatusLine().getStatusCode() == 200) {
-                state.removeSilence(id);
                 return new ResponseEntity<>(new ServiceResponse<>("Record deleted"), HttpStatus.OK);
             } else {
+                state.addSilence(silence);
                 return new ResponseEntity<>(new ServiceResponse<>("Failed to delete "+id), HttpStatus.NOT_FOUND);
             }
 
@@ -321,7 +334,7 @@ public class RestEndpoint {
         Optional<AlertManagerEntry> o = logRepo.findById(id);
         if (o.isPresent()) {
             AlertManagerEntry le = o.get();
-            le.addNote("user", note);
+            le.addNote(user, note);
             logRepo.save(le);
             return true;
         } else {

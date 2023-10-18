@@ -20,6 +20,10 @@ public class AlertManagerEntry {
     @Id
     private String id;
 
+
+    private String alertmanager;
+
+
     private List<Note> notes;
     @Indexed private LogEntryStatus status;
 
@@ -114,9 +118,17 @@ public class AlertManagerEntry {
         return time;
     }
 
+    public String getAlertmanager() {
+        return alertmanager;
+    }
+
+    public void setAlertmanager(String alertmanager) {
+        this.alertmanager = alertmanager;
+    }
+
     @Override
     public String toString() {
-        return "LogEntry{" +
+        return "Alert{" +
                 "id='" + id + '\'' +
                 ", status=" + status +
                 '}';
@@ -126,12 +138,12 @@ public class AlertManagerEntry {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        AlertManagerEntry entry = (AlertManagerEntry) o;
-        return Objects.equals(alert, entry.alert);
+        AlertManagerEntry that = (AlertManagerEntry) o;
+        return Objects.equals(alertmanager, that.alertmanager) && Objects.equals(alert, that.alert);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(alert);
+        return Objects.hash(alertmanager, alert);
     }
 }

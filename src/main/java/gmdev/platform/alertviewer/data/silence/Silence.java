@@ -16,6 +16,9 @@ public class Silence {
     @JsonProperty("createdBy")
     private String createdby;
 
+
+    private String alertmanager;
+
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = DATE_PATTERN)
     @JsonProperty("startsAt")
     private LocalDateTime startsat;
@@ -108,16 +111,25 @@ public class Silence {
         this.hoursLeft = hoursLeft;
     }
 
+
+    public String getAlertmanager() {
+        return alertmanager;
+    }
+
+    public void setAlertmanager(String alertmanager) {
+        this.alertmanager = alertmanager;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Silence silence = (Silence) o;
-        return Objects.equals(id, silence.id);
+        return Objects.equals(alertmanager, silence.alertmanager) && Objects.equals(id, silence.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return Objects.hash(alertmanager, id);
     }
 }

@@ -139,6 +139,6 @@ public class RequestService {
             .collect(Collectors.toList());
         List<String> seve = StreamSupport.stream(severities.spliterator(), false)
                 .collect(Collectors.toList());
-        return new RequestResponse(list, state.getSilences(), inst, seve, export);
+        return new RequestResponse(list, state.getSilences(), inst, seve, state.getAlertmanagerNames(), export);
     }
 }

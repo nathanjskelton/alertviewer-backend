@@ -10,6 +10,7 @@ import java.util.Set;
 
 @Document(collection = "Alert")
 public class Alert {
+
     Map<String, String> labels;
 
     Map<String, String> annotations;

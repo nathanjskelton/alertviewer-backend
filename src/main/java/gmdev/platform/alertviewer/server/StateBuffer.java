@@ -1,17 +1,21 @@
 package gmdev.platform.alertviewer.server;
 
+import gmdev.platform.alertviewer.data.AlertManagerConfig;
 import gmdev.platform.alertviewer.data.AlertManagerUser;
 import gmdev.platform.alertviewer.data.AlertManagerUserRepo;
 import gmdev.platform.alertviewer.data.silence.Silence;
+import org.apache.http.client.methods.HttpGet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
 import javax.xml.bind.DatatypeConverter;
 import java.security.MessageDigest;
 import java.util.*;
@@ -28,11 +32,58 @@ public class StateBuffer {
     private final Map<String, List<Alert>> messageStack = new HashMap<>();
     private final Map<String, Boolean> stale = new HashMap<>();
     private final Map<String, Registration> sessions = new HashMap<>();
+    private final Map<String, AlertManagerConfig> alertmanagers = new HashMap<>();
 
     private final Set<Silence> silences = new HashSet<>();
 
     @Autowired
+    Environment env;
+
+    @Autowired
     AlertManagerUserRepo userRepo;
+
+
+    @PostConstruct
+    private void init() {
+
+        try {
+            int count = Integer.parseInt(env.getProperty("alertmanager.count"));
+            for (int i = 1; i <= count; i++) {
+                String amId = ""+i;
+                String amName = env.getProperty("alertmanager.name."+amId);
+                if (amName == null || amName.isEmpty()) {
+                    log.error("Property 'alertmanager.name."+amId+"' is null or empty, there WILL be errors!");
+                }
+
+                String url = env.getProperty("alertmanager.url."+amId);
+                String name = env.getProperty("alertmanager.name."+amId);
+                AlertManagerConfig amc = new AlertManagerConfig(i, name, url);
+                alertmanagers.put(name, amc);
+
+            }
+        } catch(Exception e) {
+            log.error("Unable to read property 'alertmanager.count', which should be a non-zero positive integer");
+        }
+        log.info("*** StateBuffer Initialized ***");
+
+    }
+
+
+    public Collection<AlertManagerConfig> getAlertmanagers() {
+        return alertmanagers.values();
+    }
+
+    public List<String> getAlertmanagerNames() {
+        List<String> c = new ArrayList<>();
+        for (AlertManagerConfig amc:alertmanagers.values()) {
+            c.add(amc.getName());
+        }
+        return c;
+    }
+
+    public AlertManagerConfig getAlertmanager(String name) {
+        return alertmanagers.get(name);
+    }
 
     public boolean aquireLock() {
         synchronized (MUTEX) {
@@ -129,6 +180,15 @@ public class StateBuffer {
         }
     }
 
+    public String getUser(String sessionId) {
+        synchronized (MUTEX) {
+            if (sessions.containsKey(sessionId)) {
+                return sessions.get(sessionId).getUser();
+            }
+            return "unknown";
+        }
+    }
+
     public boolean isLock() {
         return lock > 0;
     }
@@ -178,7 +238,18 @@ public class StateBuffer {
             synchronized (MUTEX) {
                 log.info("Session " + dn + " registering...");
 
-                AlertManagerUser user = userRepo.findByDn(dn);
+                AlertManagerUser user;
+                Boolean testmode = Boolean.valueOf(env.getProperty("testmode.enabled"));
+                if (testmode) {
+                    log.warn("*** TEST MODE ENABLED, ALLOWING TEST DN ***");
+                    if ("test.dn".equals(dn)) {
+                        user = new AlertManagerUser("testuser", "test.dn", "admin", true);
+                    } else {
+                        user = null;
+                    }
+                } else {
+                    user = userRepo.findByDn(dn);
+                }
                 if (user != null) {
                     MessageDigest md = MessageDigest.getInstance("MD5");
                     md.update(dn.getBytes());
@@ -213,10 +284,28 @@ public class StateBuffer {
         }
     }
 
-    public void removeSilence(String id) {
+    public String removeSilenceAndGetAlertManager(String id) {
         synchronized (this.silences) {
-            silences.removeIf(s -> id.equals(s.getId()));
+            for(Iterator<Silence> i = silences.iterator();i.hasNext();) {
+                Silence s = i.next();
+                if (id.equals(s.getId())) {
+                    i.remove();
+                    return s.getAlertmanager();
+                }
+            }
         }
+        return null;
+    }
+
+    public Silence getSilence(String id) {
+        synchronized (this.silences) {
+            for (Silence s : silences) {
+                if (id.equals(s.getId())) {
+                    return s;
+                }
+            }
+        }
+        return null;
     }
 
     public void addSilence(Silence silence) {
