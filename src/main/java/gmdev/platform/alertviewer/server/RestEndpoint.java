@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletResponse;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
@@ -43,9 +44,18 @@ public class RestEndpoint {
     Environment env;
 
     @GetMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<RequestResponse>> login(@RequestHeader("CORTANA_DN") String dn) {
+    public ResponseEntity<ServiceResponse<RequestResponse>> login(
+            @RequestHeader(value = "Authorization", required = false) String credentials,
+            @RequestHeader(value = "CORTANA_DN", required = false) String dn) {
         try {
-            log.debug("LOGIN: "+dn);
+            log.debug("LOGIN: Authorization "+credentials+" DN "+dn);
+            if (dn == null) {
+                if (credentials.startsWith("Basic ")) {
+                    String basicCreds = new String(Base64.getDecoder().decode(credentials.substring(6)));
+                    dn = basicCreds.split(":")[0];
+                    log.debug("Using basic username as DN: "+dn);
+                }
+            }
 
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.setAccessControlExposeHeaders(List.of("Cortana_token", "Cortana_user", "Cortana_role"));

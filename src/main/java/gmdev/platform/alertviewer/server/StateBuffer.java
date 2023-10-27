@@ -244,6 +244,8 @@ public class StateBuffer {
                     log.warn("*** TEST MODE ENABLED, ALLOWING TEST DN ***");
                     if ("test.dn".equals(dn)) {
                         user = new AlertManagerUser("testuser", "test.dn", "admin", true);
+                    } else if ("admin".equals(dn)) {
+                        user = new AlertManagerUser("admin", "admin", "admin", true);
                     } else {
                         user = null;
                     }
