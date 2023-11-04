@@ -30,6 +30,11 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
+import java.io.ByteArrayInputStream;
+import java.net.URLDecoder;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+
 @RestController
 public class RestEndpoint {
     private static final Logger log = LoggerFactory.getLogger(RestEndpoint.class);
@@ -46,9 +51,13 @@ public class RestEndpoint {
     @GetMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ServiceResponse<RequestResponse>> login(
             @RequestHeader(value = "Authorization", required = false) String credentials,
-            @RequestHeader(value = "CORTANA_DN", required = false) String dn) {
+            @RequestHeader(value = "CORTANA_DN", required = false) String dn,  
+            @RequestHeader(value = "CORTANA_SSL_CERT", required = false) String certString) {
         try {
-            log.debug("LOGIN: Authorization "+credentials+" DN "+dn);
+            String certStringDecoded = URLDecoder.decode( certString, "UTF-8" ); 
+            X509Certificate cert = (X509Certificate)CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(certStringDecoded.getBytes("UTF-8")));
+	    String dnFromCert = cert.getSubjectDN().toString().replaceAll("\\s+","");
+            log.debug("LOGIN: Authorization "+credentials+" DN "+dnFromCert);
             if (dn == null) {
                 if (credentials.startsWith("Basic ")) {
                     String basicCreds = new String(Base64.getDecoder().decode(credentials.substring(6)));
@@ -59,7 +68,7 @@ public class RestEndpoint {
 
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.setAccessControlExposeHeaders(List.of("Cortana_token", "Cortana_user", "Cortana_role"));
-            Registration reg = state.registerSession(dn);
+            Registration reg = state.registerSession(dnFromCert);
             responseHeaders.set("CORTANA_TOKEN", reg.getToken());
             responseHeaders.set("CORTANA_USER", reg.getUser());
             responseHeaders.set("CORTANA_ROLE", reg.getRole());
