@@ -51,24 +51,24 @@ public class RestEndpoint {
     @GetMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ServiceResponse<RequestResponse>> login(
             @RequestHeader(value = "Authorization", required = false) String credentials,
-            @RequestHeader(value = "CORTANA_DN", required = false) String dn,  
             @RequestHeader(value = "CORTANA_SSL_CERT", required = false) String certString) {
         try {
-            String certStringDecoded = URLDecoder.decode( certString, "UTF-8" ); 
-            X509Certificate cert = (X509Certificate)CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(certStringDecoded.getBytes("UTF-8")));
-	    String dnFromCert = cert.getSubjectDN().toString().replaceAll("\\s+","");
-            log.debug("LOGIN: Authorization "+credentials+" DN "+dnFromCert);
-            if (dn == null) {
-                if (credentials.startsWith("Basic ")) {
-                    String basicCreds = new String(Base64.getDecoder().decode(credentials.substring(6)));
-                    dn = basicCreds.split(":")[0];
-                    log.debug("Using basic username as DN: "+dn);
-                }
+            String dn = null;
+            if (certString != null) {
+                String certStringDecoded = URLDecoder.decode(certString, "UTF-8");
+                X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(certStringDecoded.getBytes("UTF-8")));
+                dn = cert.getSubjectDN().toString().replaceAll("\\s+", "");
+            } else if (credentials.startsWith("Basic ")) {
+                String basicCreds = new String(Base64.getDecoder().decode(credentials.substring(6)));
+                dn = basicCreds.split(":")[0];
+                log.debug("Using basic username as DN: "+dn);
+            } else {
+                log.error("Login error: No credentials");
+                return new ResponseEntity<>(new ServiceResponse<>("No Credentials provided"), HttpStatus.UNAUTHORIZED);
             }
-
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.setAccessControlExposeHeaders(List.of("Cortana_token", "Cortana_user", "Cortana_role"));
-            Registration reg = state.registerSession(dnFromCert);
+            Registration reg = state.registerSession(dn);
             responseHeaders.set("CORTANA_TOKEN", reg.getToken());
             responseHeaders.set("CORTANA_USER", reg.getUser());
             responseHeaders.set("CORTANA_ROLE", reg.getRole());

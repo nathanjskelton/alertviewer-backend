@@ -6,16 +6,15 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import gmdev.platform.alertviewer.data.AlertManagerConfig;
+import gmdev.platform.alertviewer.data.AlertManagerEntry;
 import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.data.MetaDataHelper;
-import gmdev.platform.alertviewer.ingest.EntryProcessor;
+import gmdev.platform.alertviewer.data.alert.Alert;
+import gmdev.platform.alertviewer.data.silence.Silence;
 import gmdev.platform.alertviewer.ingest.Ingester;
+import gmdev.platform.alertviewer.server.CustomDateDeserializer;
 import gmdev.platform.alertviewer.server.StateBuffer;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
-import gmdev.platform.alertviewer.data.alert.Alert;
-import gmdev.platform.alertviewer.data.AlertManagerEntry;
-import gmdev.platform.alertviewer.data.silence.Silence;
-import gmdev.platform.alertviewer.server.CustomDateDeserializer;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
@@ -27,13 +26,18 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 @Component
 @ConditionalOnProperty(value = "ingester.type", havingValue = "alertmanager")
@@ -48,7 +52,7 @@ public class AlertIngester implements Ingester {
     MetaDataHelper meta;
 
     @Autowired
-    EntryProcessor processor;
+    MongoTemplate mongo;
 
     @Autowired
     AlertManagerEntryRepo repo;
@@ -133,7 +137,13 @@ public class AlertIngester implements Ingester {
                 }
             }
 
-            //TODO timeout resolved alerts
+            //timeout resolved alerts
+            //timeout resolved alerts
+            LocalDateTime date = LocalDateTime.now().minusDays(7);
+            Query query = new Query();
+            Criteria criteria = Criteria.where("status").is(LogEntryStatus.RESOLVED).andOperator(Criteria.where("alert.endsAt").lte(date));
+            query.addCriteria(criteria);
+            mongo.remove(query, AlertManagerEntry.class);
 
         } catch(Exception e) {
             log.error("Error reading alerts from "+amConfig.getName(), e);

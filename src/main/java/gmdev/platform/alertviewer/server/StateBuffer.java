@@ -1,5 +1,6 @@
 package gmdev.platform.alertviewer.server;
 
+import com.fasterxml.jackson.databind.annotation.JsonAppend;
 import gmdev.platform.alertviewer.data.AlertManagerConfig;
 import gmdev.platform.alertviewer.data.AlertManagerUser;
 import gmdev.platform.alertviewer.data.AlertManagerUserRepo;
@@ -41,7 +42,6 @@ public class StateBuffer {
 
     @Autowired
     AlertManagerUserRepo userRepo;
-
 
     @PostConstruct
     private void init() {

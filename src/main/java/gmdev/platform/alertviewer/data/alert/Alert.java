@@ -1,6 +1,8 @@
 package gmdev.platform.alertviewer.data.alert;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import gmdev.platform.alertviewer.ingest.LocalDateTimeDeserializer;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
@@ -16,9 +18,11 @@ public class Alert {
     Map<String, String> annotations;
 
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
     LocalDateTime startsAt;
 
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
     LocalDateTime endsAt;
 
     String generatorURL;
