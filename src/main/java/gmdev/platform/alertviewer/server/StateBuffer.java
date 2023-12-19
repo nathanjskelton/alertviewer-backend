@@ -40,6 +40,8 @@ public class StateBuffer {
     @Autowired
     Environment env;
 
+    @Autowired UserService userService;
+
     @Autowired
     AlertManagerUserRepo userRepo;
 
@@ -137,7 +139,7 @@ public class StateBuffer {
                     i.remove();
                     stale.remove(entry.getKey());
                     messageStack.remove(entry.getKey());
-                    log.debug("Session "+entry.getKey()+ " REMOVED");
+                    log.info("Stale session "+entry.getKey()+ " REMOVED for "+entry.getValue().getUser());
                 }
             }
 
@@ -233,7 +235,7 @@ public class StateBuffer {
         return new PollResult(sessionId, getMessageStack(sessionId), getStatusMessage(), isStale(sessionId), isLock());
     }
 
-    public Registration registerSession(String dn) throws AuthenticationException {
+    public Registration registerSession(String dn, String ingressUsername) throws AuthenticationException {
         try {
             synchronized (MUTEX) {
                 log.info("Session " + dn + " registering...");
@@ -242,16 +244,25 @@ public class StateBuffer {
                 Boolean testmode = Boolean.valueOf(env.getProperty("testmode.enabled"));
                 if (testmode) {
                     log.warn("*** TEST MODE ENABLED, ALLOWING TEST DN ***");
-                    if ("test.dn".equals(dn)) {
-                        user = new AlertManagerUser("testuser", "test.dn", "admin", true);
-                    } else if ("admin".equals(dn)) {
-                        user = new AlertManagerUser("admin", "admin", "admin", true);
+                    if ("TESTMODE:testuser".equals(dn)) {
+                        user = userRepo.findByDn(dn);
+                        if (user == null) {
+                            user = new AlertManagerUser("testuser", dn, "admin", true);
+                            userService.saveUser(user);
+                        }
                     } else {
                         user = null;
                     }
                 } else {
                     user = userRepo.findByDn(dn);
                 }
+
+                //automatically provision new ingress users
+                if (user == null && ingressUsername != null && !ingressUsername.isEmpty()) {
+                    user = new AlertManagerUser(ingressUsername, dn, "user", true);
+                    userService.saveUser(user);
+                }
+
                 if (user != null) {
                     MessageDigest md = MessageDigest.getInstance("MD5");
                     md.update(dn.getBytes());

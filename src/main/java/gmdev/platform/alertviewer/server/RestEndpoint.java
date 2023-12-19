@@ -51,14 +51,22 @@ public class RestEndpoint {
     @GetMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ServiceResponse<RequestResponse>> login(
             @RequestHeader(value = "Authorization", required = false) String credentials,
-            @RequestHeader(value = "CORTANA_SSL_CERT", required = false) String certString) {
+            @RequestHeader(value = "CORTANA-SSL-CERT", required = false) String certString,
+            @RequestHeader(value = "X-WEBAUTH-USER", required = false) String ingressUser) {
         try {
             String dn = null;
-            if (certString != null) {
+            Boolean testmode = Boolean.valueOf(env.getProperty("testmode.enabled"));
+            if (testmode) {
+                dn = "TESTMODE:testuser";
+                ingressUser = "testuser";
+            } else if (ingressUser != null) {
+                //assume this is a valid user
+                dn = "INGRESS:"+ingressUser;
+            } else if (certString != null) {
                 String certStringDecoded = URLDecoder.decode(certString, "UTF-8");
                 X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(certStringDecoded.getBytes("UTF-8")));
                 dn = cert.getSubjectDN().toString().replaceAll("\\s+", "");
-            } else if (credentials.startsWith("Basic ")) {
+            } else if (credentials != null && credentials.startsWith("Basic ")) {
                 String basicCreds = new String(Base64.getDecoder().decode(credentials.substring(6)));
                 dn = basicCreds.split(":")[0];
                 log.debug("Using basic username as DN: "+dn);
@@ -67,11 +75,11 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("No Credentials provided"), HttpStatus.UNAUTHORIZED);
             }
             HttpHeaders responseHeaders = new HttpHeaders();
-            responseHeaders.setAccessControlExposeHeaders(List.of("Cortana_token", "Cortana_user", "Cortana_role"));
-            Registration reg = state.registerSession(dn);
-            responseHeaders.set("CORTANA_TOKEN", reg.getToken());
-            responseHeaders.set("CORTANA_USER", reg.getUser());
-            responseHeaders.set("CORTANA_ROLE", reg.getRole());
+            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-token", "CORTANA-user", "CORTANA-role"));
+            Registration reg = state.registerSession(dn, ingressUser);
+            responseHeaders.set("CORTANA-TOKEN", reg.getToken());
+            responseHeaders.set("CORTANA-USER", reg.getUser());
+            responseHeaders.set("CORTANA-ROLE", reg.getRole());
             return new ResponseEntity("login successful", responseHeaders, HttpStatus.OK);
         } catch (Exception e) {
             log.error("Login error: "+e.getMessage(), e);
@@ -80,7 +88,7 @@ public class RestEndpoint {
     }
 
     @GetMapping(value = "/export", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String export(@RequestHeader("CORTANA_TOKEN") String token,
+    public String export(@RequestHeader("CORTANA-TOKEN") String token,
                           @RequestParam(required = false,value = "severity")List<String> severity,
                           @RequestParam(required = false,value = "start")String start,
                           @RequestParam(required = false,value = "end")String end,
@@ -104,7 +112,7 @@ public class RestEndpoint {
 
 
     @GetMapping(value = "/alerts", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<RequestResponse>> request(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<RequestResponse>> request(@RequestHeader("CORTANA-TOKEN") String token,
                                     @RequestParam(required = false,value = "severity")List<String> severity,
                                     @RequestParam(required = false,value = "start")String start,
                                     @RequestParam(required = false,value = "end")String end,
@@ -125,7 +133,7 @@ public class RestEndpoint {
     }
 
     @GetMapping(value = "/users", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<UsersResponse>> users(@RequestHeader("CORTANA_TOKEN") String token) {
+    public ResponseEntity<ServiceResponse<UsersResponse>> users(@RequestHeader("CORTANA-TOKEN") String token) {
 
         try {
             if (!state.isAdmin(token)) {
@@ -141,7 +149,7 @@ public class RestEndpoint {
     }
 
     @PostMapping(value = "/user", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> saveUser(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<Void>> saveUser(@RequestHeader("CORTANA-TOKEN") String token,
                                                       @RequestBody AlertManagerUser user) {
         if (!state.isAdmin(token)) {
             log.info("Unauthorized endpoint access: save user");
@@ -151,7 +159,7 @@ public class RestEndpoint {
         return new ResponseEntity<>(new ServiceResponse<>("User added"), HttpStatus.OK);
     }
     @DeleteMapping(value = "/user")
-    public ResponseEntity<ServiceResponse<Void>> deleteUser(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<Void>> deleteUser(@RequestHeader("CORTANA-TOKEN") String token,
                                                                @RequestParam(value = "id")String id) {
         if (!state.isAdmin(token)) {
             log.info("Unauthorized endpoint access: delete user");
@@ -162,7 +170,7 @@ public class RestEndpoint {
     }
 
     @PutMapping("/mark")
-    public ResponseEntity<ServiceResponse<Void>> mark(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<Void>> mark(@RequestHeader("CORTANA-TOKEN") String token,
                       @RequestParam(value = "id")String id,
                       @RequestParam(value = "status")String status) {
         try {
@@ -181,22 +189,24 @@ public class RestEndpoint {
 
 
     @GetMapping("/poll")
-    public ResponseEntity<ServiceResponse<PollResult>> poll(@RequestHeader("CORTANA_TOKEN") String token) {
+    public ResponseEntity<ServiceResponse<PollResult>> poll(@RequestHeader("CORTANA-TOKEN") String token) {
         try {
             if (!state.isValidSession(token)) {
-                log.info("Unauthorized endpoint access: poll");
+                log.warn("Unauthorized endpoint access: poll, token="+token);
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
             PollResult pr = state.poll(token);
+            log.debug("Poll received with token="+token);
             return new ResponseEntity<>(new ServiceResponse<>("Poll complete", pr), HttpStatus.OK);
         } catch (ServiceException e) {
+            log.error("Error while polling, token="+token, e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
 
     @DeleteMapping(value = "/alert")
-    public ResponseEntity<ServiceResponse<Void>> delete(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<Void>> delete(@RequestHeader("CORTANA-TOKEN") String token,
                                                         @RequestParam(value = "id")String id) {
         try {
             if (!state.isAdmin(token)) {
@@ -215,7 +225,7 @@ public class RestEndpoint {
 
 
     @PostMapping(value = "/note", consumes = MediaType.TEXT_PLAIN_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> note(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<Void>> note(@RequestHeader("CORTANA-TOKEN") String token,
                                                       @RequestParam(value = "id")String id, @RequestBody String note) {
         try {
             if (!state.isValidSession(token)) {
@@ -235,7 +245,7 @@ public class RestEndpoint {
     }
 
     @PostMapping(value = "/silence", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> silence(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<Void>> silence(@RequestHeader("CORTANA-TOKEN") String token,
                                                          @RequestBody String payload) {
         try {
             if (!state.isAdmin(token)) {
@@ -282,7 +292,7 @@ public class RestEndpoint {
     }
 
     @PostMapping(value = "/jira", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ServiceResponse<Void>> jira(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<Void>> jira(@RequestHeader("CORTANA-TOKEN") String token,
                                                       @RequestBody String payload) {
         try {
             if (!state.isValidSession(token)) {
@@ -316,7 +326,7 @@ public class RestEndpoint {
     }
 
     @DeleteMapping(value = "/silence")
-    public ResponseEntity<ServiceResponse<Void>> deleteSilence(@RequestHeader("CORTANA_TOKEN") String token,
+    public ResponseEntity<ServiceResponse<Void>> deleteSilence(@RequestHeader("CORTANA-TOKEN") String token,
                                                                @RequestParam(value = "id")String id) {
         try {
             if (!state.isAdmin(token)) {

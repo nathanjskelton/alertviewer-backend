@@ -5,4 +5,4 @@ COPY target/alertviewer-backend-1.0-SNAPSHOT.jar app.jar
 COPY src/main/resources/application.properties ./
 COPY keystore.jks ./
 EXPOSE 8085
-ENTRYPOINT ["java","-jar","/app.jar"]
+ENTRYPOINT java $JAVA_OPTS -jar /app.jar
