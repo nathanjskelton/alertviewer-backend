@@ -15,10 +15,6 @@ import gmdev.platform.alertviewer.ingest.Ingester;
 import gmdev.platform.alertviewer.server.CustomDateDeserializer;
 import gmdev.platform.alertviewer.server.StateBuffer;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.DefaultHttpClient;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -31,8 +27,16 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Component;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509ExtendedTrustManager;
+import java.net.Socket;
+import java.net.URI;
+import java.net.http.HttpRequest;
+import java.security.SecureRandom;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -75,18 +79,18 @@ public class AlertIngester implements Ingester {
 
 
         try {
-            HttpClient http = new DefaultHttpClient();
-            HttpGet get = new HttpGet(amConfig.getAlertsUrl());
-            HttpResponse response = http.execute(get);
-            BufferedReader bR = new BufferedReader(new InputStreamReader(response.getEntity().getContent()));
-            String line = "";
+            SSLContext sslContext = SSLContext.getInstance("SSL"); // OR TLS
+            sslContext.init(null, new TrustManager[]{MOCK_TRUST_MANAGER}, new SecureRandom());
 
-            StringBuilder responseStrBuilder = new StringBuilder();
-            while((line =  bR.readLine()) != null){
-                responseStrBuilder.append(line);
-            }
-            JSONObject json = new JSONObject(responseStrBuilder.toString());
-            //log.info(json.toString());;
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContext).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(new URI(amConfig.getAlertsUrl()))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            JSONObject json = new JSONObject(response.body());
 
             List<AlertManagerEntry> allActiveMinusDatabased = repo.findAll();
 
@@ -154,17 +158,19 @@ public class AlertIngester implements Ingester {
     public List<Silence> getSilences(AlertManagerConfig amConfig) {
         List<Silence> existingSilences = new ArrayList<>();
         try {
-            HttpClient http = new DefaultHttpClient();
-            HttpGet get2 = new HttpGet(amConfig.getSilencesUrl());
-            String line = "";
-            HttpResponse response2 = http.execute(get2);
-            BufferedReader bR2 = new BufferedReader(new InputStreamReader(response2.getEntity().getContent()));
+            SSLContext sslContext = SSLContext.getInstance("SSL"); // OR TLS
+            sslContext.init(null, new TrustManager[]{MOCK_TRUST_MANAGER}, new SecureRandom());
 
-            StringBuilder responseStrBuilder2 = new StringBuilder();
-            while((line =  bR2.readLine()) != null){
-                responseStrBuilder2.append(line);
-            }
-            JSONObject silencesJson = new JSONObject(responseStrBuilder2.toString());
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContext).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(new URI(amConfig.getSilencesUrl()))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            JSONObject silencesJson = new JSONObject(response.body());
+
             //log.debug("SILENCES JSON: "+silencesJson.toString());
 
             JSONArray silences = silencesJson.getJSONArray("data");
@@ -195,4 +201,41 @@ public class AlertIngester implements Ingester {
 
     }
 
+
+    private static final TrustManager MOCK_TRUST_MANAGER = new X509ExtendedTrustManager() {
+        @Override
+        public void checkClientTrusted(X509Certificate[] x509Certificates, String s, Socket socket) throws CertificateException {
+
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] x509Certificates, String s, Socket socket) throws CertificateException {
+
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] x509Certificates, String s, SSLEngine sslEngine) throws CertificateException {
+
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] x509Certificates, String s, SSLEngine sslEngine) throws CertificateException {
+
+        }
+
+        @Override
+        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+            return new java.security.cert.X509Certificate[0];
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
+
+        }
+
+        @Override
+        public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) throws CertificateException {
+            // empty method
+        }
+    };
 }
