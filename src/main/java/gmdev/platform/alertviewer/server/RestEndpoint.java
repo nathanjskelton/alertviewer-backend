@@ -8,12 +8,7 @@ import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.data.AlertManagerUser;
 import gmdev.platform.alertviewer.data.jira.WraithGeneric;
 import gmdev.platform.alertviewer.data.silence.Silence;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpDelete;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.DefaultHttpClient;
+import gmdev.platform.alertviewer.util.SSLContextFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +20,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletResponse;
+import java.net.URI;
+import java.net.http.HttpRequest;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
@@ -39,6 +36,7 @@ import java.security.cert.X509Certificate;
 public class RestEndpoint {
     private static final Logger log = LoggerFactory.getLogger(RestEndpoint.class);
 
+    @Autowired SSLContextFactory sslContextFactory;
     @Autowired RequestService requestService;
     @Autowired UserService userService;
     @Autowired MarkService markService;
@@ -272,18 +270,22 @@ public class RestEndpoint {
             objectMapper2.registerModule(new JavaTimeModule());
             objectMapper2.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
             String newJson = objectMapper2.writeValueAsString(silence);
-            HttpClient http = new DefaultHttpClient();
-            HttpPost post = new HttpPost(silencesUrl);
-            post.setEntity(new StringEntity(newJson));
-            HttpResponse response = http.execute(post);
 
-            if (response.getStatusLine().getStatusCode()==200) {
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(new URI(silencesUrl))
+                    .POST(HttpRequest.BodyPublishers.ofString(newJson))
+                    .header("Content-Type", "application/json")
+                    .build();
+            java.net.http.HttpResponse<String> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode()==200) {
                 state.addSilence(silence);
                 return new ResponseEntity<>(new ServiceResponse<>("Silence added"), HttpStatus.OK);
             } else {
-                log.warn("Error saving silence: "+response.getStatusLine());
+                log.warn("Error saving silence: "+response.body());
                 log.debug(newJson);
-                return new ResponseEntity<>(new ServiceResponse<>("Error saving silence"), HttpStatus.valueOf(response.getStatusLine().getStatusCode()));
+                return new ResponseEntity<>(new ServiceResponse<>("Error saving silence"), HttpStatus.valueOf(response.statusCode()));
             }
         } catch (Exception e) {
             log.error(e.getMessage(), e);
@@ -305,19 +307,21 @@ public class RestEndpoint {
             WraithGeneric jira = objectMapper.readValue(payload, WraithGeneric.class);
 
             String newJson = objectMapper.writeValueAsString(jira);
-            HttpClient http = new DefaultHttpClient();
-            HttpPost post = new HttpPost(env.getProperty("wraith.generic.url"));
-            post.setHeader("Content-Type", "application/json");
-            log.debug("Submitting JSON to Jira: "+newJson);
-            post.setEntity(new StringEntity(newJson));
-            HttpResponse response = http.execute(post);
 
-            if (response.getStatusLine().getStatusCode()==200) {
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(new URI(env.getProperty("wraith.generic.url")))
+                    .POST(HttpRequest.BodyPublishers.ofString(newJson))
+                    .header("Content-Type", "application/json")
+                    .build();
+            java.net.http.HttpResponse<String> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode()==200) {
                 return new ResponseEntity<>(new ServiceResponse<>("Jira added with label " + jira.getId()), HttpStatus.OK);
             } else {
-                log.warn("Error submitting to jira: "+response.getStatusLine());
+                log.warn("Error submitting to jira: "+response.body());
                 log.debug(newJson);
-                return new ResponseEntity<>(new ServiceResponse<>("Error submitting to jira"), HttpStatus.valueOf(response.getStatusLine().getStatusCode()));
+                return new ResponseEntity<>(new ServiceResponse<>("Error submitting to jira"), HttpStatus.valueOf(response.statusCode()));
             }
         } catch (Exception e) {
             log.error(e.getMessage(), e);
@@ -342,11 +346,15 @@ public class RestEndpoint {
             String amName = state.removeSilenceAndGetAlertManager(id);
             String silenceUrl = state.getAlertmanager(amName).getSilenceUrl();
 
-            HttpClient http = new DefaultHttpClient();
-            HttpDelete delete = new HttpDelete(silenceUrl+"/"+id);
-            HttpResponse response = http.execute(delete);
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(new URI(silenceUrl+"/"+id))
+                    .DELETE()
+                    .build();
+            java.net.http.HttpResponse<Void> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
 
-            if (response.getStatusLine().getStatusCode() == 200) {
+
+            if (response.statusCode() == 200) {
                 return new ResponseEntity<>(new ServiceResponse<>("Record deleted"), HttpStatus.OK);
             } else {
                 state.addSilence(silence);

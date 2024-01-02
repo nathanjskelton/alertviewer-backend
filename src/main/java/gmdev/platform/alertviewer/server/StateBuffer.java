@@ -1,11 +1,9 @@
 package gmdev.platform.alertviewer.server;
 
-import com.fasterxml.jackson.databind.annotation.JsonAppend;
 import gmdev.platform.alertviewer.data.AlertManagerConfig;
 import gmdev.platform.alertviewer.data.AlertManagerUser;
 import gmdev.platform.alertviewer.data.AlertManagerUserRepo;
 import gmdev.platform.alertviewer.data.silence.Silence;
-import org.apache.http.client.methods.HttpGet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

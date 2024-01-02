@@ -15,6 +15,7 @@ import gmdev.platform.alertviewer.ingest.Ingester;
 import gmdev.platform.alertviewer.server.CustomDateDeserializer;
 import gmdev.platform.alertviewer.server.StateBuffer;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
+import gmdev.platform.alertviewer.util.SSLContextFactory;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -27,13 +28,12 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Component;
 
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509ExtendedTrustManager;
+import javax.net.ssl.*;
+import java.io.FileInputStream;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
@@ -51,6 +51,9 @@ public class AlertIngester implements Ingester {
 
     @Autowired
     Environment env;
+
+    @Autowired
+    SSLContextFactory sslContextFactory;
 
     @Autowired
     MetaDataHelper meta;
@@ -76,20 +79,13 @@ public class AlertIngester implements Ingester {
 
     public void ingest(AlertManagerConfig amConfig) {
         log.info("AlertManager Ingester running for alertmanager "+amConfig.getName());
-
-
         try {
-            SSLContext sslContext = SSLContext.getInstance("SSL"); // OR TLS
-            sslContext.init(null, new TrustManager[]{MOCK_TRUST_MANAGER}, new SecureRandom());
-
-            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContext).build();
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(new URI(amConfig.getAlertsUrl()))
                     .GET()
                     .build();
-
             java.net.http.HttpResponse<String> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-
             JSONObject json = new JSONObject(response.body());
 
             List<AlertManagerEntry> allActiveMinusDatabased = repo.findAll();
@@ -158,10 +154,7 @@ public class AlertIngester implements Ingester {
     public List<Silence> getSilences(AlertManagerConfig amConfig) {
         List<Silence> existingSilences = new ArrayList<>();
         try {
-            SSLContext sslContext = SSLContext.getInstance("SSL"); // OR TLS
-            sslContext.init(null, new TrustManager[]{MOCK_TRUST_MANAGER}, new SecureRandom());
-
-            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContext).build();
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(new URI(amConfig.getSilencesUrl()))
                     .GET()
@@ -171,7 +164,7 @@ public class AlertIngester implements Ingester {
 
             JSONObject silencesJson = new JSONObject(response.body());
 
-            //log.debug("SILENCES JSON: "+silencesJson.toString());
+            log.debug("SILENCES JSON: "+silencesJson.toString());
 
             JSONArray silences = silencesJson.getJSONArray("data");
             for (int i = 0;i < silences.length();i++) {
@@ -201,41 +194,4 @@ public class AlertIngester implements Ingester {
 
     }
 
-
-    private static final TrustManager MOCK_TRUST_MANAGER = new X509ExtendedTrustManager() {
-        @Override
-        public void checkClientTrusted(X509Certificate[] x509Certificates, String s, Socket socket) throws CertificateException {
-
-        }
-
-        @Override
-        public void checkServerTrusted(X509Certificate[] x509Certificates, String s, Socket socket) throws CertificateException {
-
-        }
-
-        @Override
-        public void checkClientTrusted(X509Certificate[] x509Certificates, String s, SSLEngine sslEngine) throws CertificateException {
-
-        }
-
-        @Override
-        public void checkServerTrusted(X509Certificate[] x509Certificates, String s, SSLEngine sslEngine) throws CertificateException {
-
-        }
-
-        @Override
-        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-            return new java.security.cert.X509Certificate[0];
-        }
-
-        @Override
-        public void checkClientTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
-
-        }
-
-        @Override
-        public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) throws CertificateException {
-            // empty method
-        }
-    };
 }
