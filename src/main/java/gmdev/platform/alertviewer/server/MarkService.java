@@ -27,6 +27,13 @@ public class MarkService {
         if (entry.isPresent()) {
             AlertManagerEntry le = entry.get();
             le.setStatus(LogEntryStatus.valueOf(status));
+            if (LogEntryStatus.ACKED.toString().equals(status)) {
+                le.setAcked(true);
+                le.setFlapping(false);
+            }
+            if (LogEntryStatus.NEW.toString().equals(status)) {
+                le.setAcked(false);
+            }
             repo.save(le);
         } else {
             throw new ServiceException("Record not found, unable to mark");

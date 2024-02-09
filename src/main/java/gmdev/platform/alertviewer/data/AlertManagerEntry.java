@@ -29,6 +29,10 @@ public class AlertManagerEntry {
 
     private boolean regex = false;
 
+    private boolean acked = false;
+
+    private boolean flapping = false;
+
     private String friendlyStartTime;
 
     private String friendlyEndTime;
@@ -74,6 +78,22 @@ public class AlertManagerEntry {
 
     public void setStatus(LogEntryStatus status) {
         this.status = status;
+    }
+
+    public boolean isAcked() {
+        return acked;
+    }
+
+    public void setAcked(boolean acked) {
+        this.acked = acked;
+    }
+
+    public boolean isFlapping() {
+        return flapping;
+    }
+
+    public void setFlapping(boolean flapping) {
+        this.flapping = flapping;
     }
 
     public List<Note> getNotes() {

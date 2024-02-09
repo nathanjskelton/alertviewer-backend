@@ -106,6 +106,9 @@ public class AlertIngester implements Ingester {
                     if (LogEntryStatus.RESOLVED.equals(databaseEntry.getStatus())) {
                         databaseEntry.addNote("System", "Previously RESOLVED alert is now NEW");
                         databaseEntry.setStatus(LogEntryStatus.NEW);
+                        if (!databaseEntry.isAcked()) {
+                            databaseEntry.setFlapping(true);
+                        }
                     }
                     if ("suppressed".equals(alertFromAlertmanager.getStatus().getState())) {
                         if (!LogEntryStatus.SILENCED.equals(databaseEntry.getStatus())) {

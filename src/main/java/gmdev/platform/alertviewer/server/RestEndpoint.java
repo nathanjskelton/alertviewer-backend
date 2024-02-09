@@ -266,6 +266,7 @@ public class RestEndpoint {
             LocalDateTime ends = dnow.plusHours(silence.getHours());
             silence.setEndsat(ends);
 
+
             ObjectMapper objectMapper2 = new ObjectMapper();
             objectMapper2.registerModule(new JavaTimeModule());
             objectMapper2.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -281,6 +282,7 @@ public class RestEndpoint {
 
             if (response.statusCode()==200) {
                 state.addSilence(silence);
+                addNote(silence.getId()+":"+System.currentTimeMillis(), silence.getCreatedby(), "Silence submitted to "+state.getAlertmanager(silence.getAlertmanager()).getName());
                 return new ResponseEntity<>(new ServiceResponse<>("Silence added"), HttpStatus.OK);
             } else {
                 log.warn("Error saving silence: "+response.body());
