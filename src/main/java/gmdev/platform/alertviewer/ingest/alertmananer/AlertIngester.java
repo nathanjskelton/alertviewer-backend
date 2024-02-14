@@ -148,8 +148,12 @@ public class AlertIngester implements Ingester {
             query.addCriteria(criteria);
             mongo.remove(query, AlertManagerEntry.class);
 
+            state.getAlertManagersAll().add(amConfig.getName());
+            state.getAlertManagersUp().add(amConfig.getName());
+
         } catch(Exception e) {
             log.error("Error reading alerts from "+amConfig.getName(), e);
+            state.getAlertManagersUp().remove(amConfig.getName());
         }
     }
 

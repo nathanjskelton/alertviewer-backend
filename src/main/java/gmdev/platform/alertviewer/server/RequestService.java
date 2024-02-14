@@ -1,8 +1,11 @@
 package gmdev.platform.alertviewer.server;
 
 import com.mongodb.client.DistinctIterable;
+import com.mongodb.client.model.Filters;
 import gmdev.platform.alertviewer.data.AlertManagerEntry;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
+import org.bson.BsonDocument;
+import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +70,10 @@ public class RequestService {
         DistinctIterable<String> instances = mongo.getCollection("AlertManagerEntry").distinct("alert.labels.gm_instance", String.class);
         DistinctIterable<String> severities = mongo.getCollection("AlertManagerEntry").distinct("alert.labels.severity", String.class);
 
+        Bson bson = Filters.exists("alert.labels.gm_instance", false);
+        long legacyDocs = mongo.getCollection("AlertManagerEntry").countDocuments(bson);
+        log.debug("There are "+legacyDocs+" legacy documents");
+
         Query query = new Query();
         //if (startDate == null) startDate = LocalDateTime.now().minusDays(1);
         //if (endDate == null) endDate = LocalDateTime.now();
@@ -85,6 +92,8 @@ public class RequestService {
 
         Criteria silencedCriteria = Criteria.where("status").is(LogEntryStatus.SILENCED);
         if (statusEnums.contains(LogEntryStatus.SILENCED)) criteriaOrList.add(silencedCriteria);
+
+
 
         //combine the appropriate criteria based on selected statuses
         Criteria criteria = new Criteria();
@@ -116,9 +125,21 @@ public class RequestService {
         }
         if (gminstances != null && !gminstances.isEmpty()) {
             log.debug("anding a gm_instance");
-            Criteria gmInstancesCriteria = Criteria.where("alert.labels.gm_instance").in(gminstances);
+            Criteria gmInstancesCriteria;
+            if (gminstances.contains("legacy")) {
+                gmInstancesCriteria = new Criteria();
+                gmInstancesCriteria.orOperator(
+                        Criteria.where("alert.labels.gm_instance").in(gminstances),
+                        Criteria.where("alert.labels.gm_instance").exists(false)
+                );
+            } else {
+                gmInstancesCriteria = Criteria.where("alert.labels.gm_instance").in(gminstances);
+            }
             andMe.add(gmInstancesCriteria);
         }
+
+        Criteria flappingFalse = Criteria.where("flapping").is(false);
+        if (!statusEnums.contains(LogEntryStatus.FLAPPING)) andMe.add(flappingFalse);
 
         Criteria finalCriteria;
         if (!andMe.isEmpty()) {
@@ -137,6 +158,10 @@ public class RequestService {
 
         List<String> inst = StreamSupport.stream(instances.spliterator(), false)
             .collect(Collectors.toList());
+        if (legacyDocs > 0) {
+            inst.add("legacy");
+        }
+
         List<String> seve = StreamSupport.stream(severities.spliterator(), false)
                 .collect(Collectors.toList());
         return new RequestResponse(list, state.getSilences(), inst, seve, state.getAlertmanagerNames(), export);

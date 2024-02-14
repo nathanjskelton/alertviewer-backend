@@ -144,6 +144,12 @@ public class AlertManagerEntry {
 
     public void setAlertmanager(String alertmanager) {
         this.alertmanager = alertmanager;
+        String gm = alert.getLabels().get("gm_instance");
+        if (gm == null || gm.isEmpty()) {
+            gm = alertmanager;
+            alert.getLabels().put("gm_instance", gm);
+            alert.getAnnotations().put("gm_instance_from_am", "true");
+        }
     }
 
     @Override
