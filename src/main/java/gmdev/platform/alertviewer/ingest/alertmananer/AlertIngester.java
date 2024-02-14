@@ -79,6 +79,7 @@ public class AlertIngester implements Ingester {
 
     public void ingest(AlertManagerConfig amConfig) {
         log.info("AlertManager Ingester running for alertmanager "+amConfig.getName());
+        state.getAlertManagersAll().add(amConfig.getName());
         try {
             java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
             HttpRequest request = HttpRequest.newBuilder()
@@ -148,7 +149,6 @@ public class AlertIngester implements Ingester {
             query.addCriteria(criteria);
             mongo.remove(query, AlertManagerEntry.class);
 
-            state.getAlertManagersAll().add(amConfig.getName());
             state.getAlertManagersUp().add(amConfig.getName());
 
         } catch(Exception e) {
