@@ -1,9 +1,6 @@
 package gmdev.platform.alertviewer.server;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class PollResult {
 
@@ -12,7 +9,7 @@ public class PollResult {
     private String sessionId;
     private boolean dataStale;
 
-    private Map<String, Boolean> alertManagerStatus = new HashMap<>();
+    private Map<String, Boolean> alertManagerStatus = new TreeMap<>();
 
     private boolean locked;
 

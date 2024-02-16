@@ -26,8 +26,8 @@ public class StateBuffer {
 
     private final Object MUTEX = new Object();
     private final Map<String, CompletableFuture<String>> asyncs = new HashMap<>();
-    private final Set<String> alertManagersAll = new HashSet<>();
-    private final Set<String> alertManagersUp = new HashSet<>();
+    private final Set<String> alertManagersAll = new TreeSet<>();
+    private final Set<String> alertManagersUp = new TreeSet<>();
 
     private final Map<String, List<Alert>> messageStack = new HashMap<>();
     private final Map<String, Boolean> stale = new HashMap<>();
