@@ -1,7 +1,10 @@
 package gmdev.platform.alertviewer.data;
 
+import gmdev.platform.alertviewer.server.RestEndpoint;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
 import gmdev.platform.alertviewer.data.alert.Alert;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -9,13 +12,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 @Document(collection = "AlertManagerEntry")
 public class AlertManagerEntry {
+    private static final Logger log = LoggerFactory.getLogger(AlertManagerEntry.class);
 
     @Id
     private String id;
@@ -39,15 +40,21 @@ public class AlertManagerEntry {
 
     private Alert alert;
 
-    public AlertManagerEntry(Alert alert) {
-        this.alert = alert;
+    Set<String> fieldsToAggregate;
+
+    Set<String> fingerprints = new HashSet<>();
+
+
+    public AlertManagerEntry(String id, Alert alert, Set<String> fieldsToAggregate) {
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
         friendlyStartTime = alert.getStartsAt().format(dtf);
         friendlyEndTime = alert.getEndsAt().format(dtf);
 
-        this.id = alert.getFingerprint();
+        this.fieldsToAggregate = fieldsToAggregate;
+        this.id = id;
         this.status = LogEntryStatus.NEW;
         notes = new ArrayList<>();
+        setAlert(alert);
     }
 
     public String getId() {
@@ -56,6 +63,18 @@ public class AlertManagerEntry {
 
     public Alert getAlert() {
         return alert;
+    }
+
+    public boolean isGroup() {
+        return !alert.getFingerprint().equals(id);
+    }
+
+    public Set<String> getFieldsToAggregate() {
+        return fieldsToAggregate;
+    }
+
+    public Set<String> getFingerprints() {
+        return fingerprints;
     }
 
     public String getFriendlyStartTime() {
@@ -67,9 +86,36 @@ public class AlertManagerEntry {
     }
 
     public void setAlert(Alert alert) {
-        if (!alert.getFingerprint().equals(this.id)) {throw new RuntimeException("Fingerprint mismatch:\n"+
-                this.id+">>>\n"+this.alert.toString()+"\n\n"+alert.getFingerprint()+">>>\n"+alert.toString());}
-        this.alert = alert;
+        if (this.fingerprints.contains(alert.getFingerprint())) {
+            //update it
+            this.alert.setEndsAt(alert.getEndsAt());
+            this.alert.setStartsAt(alert.getStartsAt());
+            this.alert.setReceivers(alert.getReceivers());
+            this.alert.setGeneratorURL(alert.getGeneratorURL());
+        } else {
+            //add it
+            if (this.alert != null && isGroup()) {
+                log.debug("Aggregating alert: ");
+                Map<String, String> newAnnotations = new HashMap<>();
+                if (this.alert.getAnnotations() != null) {
+                    newAnnotations.putAll(this.alert.getAnnotations());
+                }
+                for (String f : fieldsToAggregate) {
+                    log.debug("^ Aggregating field: " + f);
+                    String a = this.alert.getAnnotations().get(f);
+                    log.debug("^ ..was: " + a);
+                    String na = alert.getAnnotations().get(f);
+                    if (na != null && !na.isEmpty()) {
+                        a = a + "\n" + na;
+                    }
+                    log.debug("^ ...is: " + a);
+                    newAnnotations.put(f, a);
+                }
+                alert.setAnnotations(newAnnotations);
+            }
+            this.alert = alert;
+            this.fingerprints.add(this.alert.getFingerprint());
+        }
     }
 
     public LogEntryStatus getStatus() {

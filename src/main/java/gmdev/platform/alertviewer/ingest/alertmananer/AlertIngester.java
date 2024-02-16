@@ -33,9 +33,7 @@ import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @Component
 @ConditionalOnProperty(value = "ingester.type", havingValue = "alertmanager")
@@ -144,6 +142,9 @@ public class AlertIngester implements Ingester {
             List<AlertManagerEntry> allActiveMinusDatabased = repo.findAll();
 
             //process the incoming active alerts
+            Set<String> groupLabels = env.getProperty("group.labels", HashSet.class);
+            Set<String> groupAnnotations = env.getProperty("group.annotations", HashSet.class);
+            Set<String> fieldsToAggregate = env.getProperty("group.fieldsToAggregate", HashSet.class);
             JSONArray data = json.getJSONArray("data");
             for (int i = 0;i < data.length();i++) {
                 String jsonAlert = data.getJSONObject(i).toString();
@@ -151,9 +152,37 @@ public class AlertIngester implements Ingester {
                 objectMapper.registerModule(new JavaTimeModule());
                 objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
                 Alert alertFromAlertmanager = objectMapper.readValue(jsonAlert, Alert.class);
-                Optional<AlertManagerEntry> alertFromDatabase = repo.findByIdAndAlertmanager(alertFromAlertmanager.getFingerprint(), amConfig.getName());
+
+                boolean group = false;
+                String id = alertFromAlertmanager.getFingerprint();
+                StringBuilder sb = new StringBuilder();
+                if ((groupLabels != null && groupLabels.size() > 0)) {
+                    sb.append("L_");
+                    for (String s : groupLabels) {
+                        sb.append(alertFromAlertmanager.getLabels().get(s));
+                    }
+                }
+                if ((groupAnnotations != null && groupAnnotations.size() > 0)) {
+                    if (sb.length() > 0) sb.append("_");
+                    sb.append("A_");
+                    for (String s : groupAnnotations) {
+                        sb.append(alertFromAlertmanager.getAnnotations().get(s));
+                    }
+                }
+                if (sb.length() > 0) {
+                    group = true;
+                    id = sb.toString();
+                }
+
+                //log.debug("Looking for existing entry with id "+id);
+                Optional<AlertManagerEntry> alertFromDatabase = repo.findByIdAndAlertmanager(id, amConfig.getName());
+                if (group) {
+                    //cleanup by fingerprint if needed
+                    repo.deleteById(alertFromAlertmanager.getFingerprint());
+                }
                 AlertManagerEntry databaseEntry;
                 if (alertFromDatabase.isPresent()) {
+                    //log.debug("Found existing entry with id "+id);
                     databaseEntry = alertFromDatabase.get();
                     databaseEntry.setAlert(alertFromAlertmanager);
                     if (LogEntryStatus.RESOLVED.equals(databaseEntry.getStatus())) {
@@ -177,7 +206,9 @@ public class AlertIngester implements Ingester {
 
                     allActiveMinusDatabased.remove(databaseEntry);
                 } else {
-                    databaseEntry = new AlertManagerEntry(alertFromAlertmanager);
+                    //log.debug("Creating entry with id "+id);
+                    //log.debug("Aggregating fields "+fieldsToAggregate);
+                    databaseEntry = new AlertManagerEntry(id, alertFromAlertmanager, fieldsToAggregate);
                     databaseEntry.addNote("System", "New alert imported from "+amConfig.getName());
                 }
                 databaseEntry.setAlertmanager(amConfig.getName());
