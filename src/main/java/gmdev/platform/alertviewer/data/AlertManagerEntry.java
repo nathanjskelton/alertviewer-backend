@@ -93,6 +93,13 @@ public class AlertManagerEntry {
             this.alert.setReceivers(alert.getReceivers());
             this.alert.setGeneratorURL(alert.getGeneratorURL());
         } else {
+            //backward compatible to when service was an annotation
+            String serviceAnn = this.alert.getAnnotations().get("service");
+            String serviceLbl = this.alert.getLabels().get("service");
+            if (serviceAnn != null && !serviceAnn.isEmpty() && (serviceLbl == null || serviceLbl.isEmpty())) {
+                this.alert.getLabels().put("service", serviceAnn);
+            }
+            
             //add it
             if (this.alert != null && isGroup()) {
                 //log.debug("Aggregating alert: ");
