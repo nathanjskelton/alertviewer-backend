@@ -95,20 +95,20 @@ public class AlertManagerEntry {
         } else {
             //add it
             if (this.alert != null && isGroup()) {
-                log.debug("Aggregating alert: ");
+                //log.debug("Aggregating alert: ");
                 Map<String, String> newAnnotations = new HashMap<>();
                 if (this.alert.getAnnotations() != null) {
                     newAnnotations.putAll(this.alert.getAnnotations());
                 }
                 for (String f : fieldsToAggregate) {
-                    log.debug("^ Aggregating field: " + f);
+                    //log.debug("^ Aggregating field: " + f);
                     String a = this.alert.getAnnotations().get(f);
-                    log.debug("^ ..was: " + a);
+                    //log.debug("^ ..was: " + a);
                     String na = alert.getAnnotations().get(f);
                     if (na != null && !na.isEmpty()) {
                         a = a + "\n" + na;
                     }
-                    log.debug("^ ...is: " + a);
+                    //log.debug("^ ...is: " + a);
                     newAnnotations.put(f, a);
                 }
                 alert.setAnnotations(newAnnotations);

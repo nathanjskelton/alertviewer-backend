@@ -16,6 +16,7 @@ import gmdev.platform.alertviewer.server.CustomDateDeserializer;
 import gmdev.platform.alertviewer.server.StateBuffer;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
 import gmdev.platform.alertviewer.util.SSLContextFactory;
+import org.apache.tomcat.util.security.MD5Encoder;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -31,6 +32,7 @@ import org.springframework.stereotype.Component;
 import java.net.URI;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -139,7 +141,7 @@ public class AlertIngester implements Ingester {
                 return;
             }
 
-            List<AlertManagerEntry> allActiveMinusDatabased = repo.findAll();
+            List<AlertManagerEntry> allDatabasedMinusActive = repo.findAll();
 
             //process the incoming active alerts
             Set<String> groupLabels = env.getProperty("group.labels", HashSet.class);
@@ -157,21 +159,21 @@ public class AlertIngester implements Ingester {
                 String id = alertFromAlertmanager.getFingerprint();
                 StringBuilder sb = new StringBuilder();
                 if ((groupLabels != null && groupLabels.size() > 0)) {
-                    sb.append("L_");
+                    sb.append("L:");
                     for (String s : groupLabels) {
                         sb.append(alertFromAlertmanager.getLabels().get(s));
                     }
                 }
                 if ((groupAnnotations != null && groupAnnotations.size() > 0)) {
                     if (sb.length() > 0) sb.append("_");
-                    sb.append("A_");
+                    sb.append("A:");
                     for (String s : groupAnnotations) {
                         sb.append(alertFromAlertmanager.getAnnotations().get(s));
                     }
                 }
                 if (sb.length() > 0) {
                     group = true;
-                    id = sb.toString();
+                    id = "GROUP:"+new String(MessageDigest.getInstance("MD5").digest(sb.toString().getBytes()));
                 }
 
                 //log.debug("Looking for existing entry with id "+id);
@@ -179,6 +181,12 @@ public class AlertIngester implements Ingester {
                 if (group) {
                     //cleanup by fingerprint if needed
                     repo.deleteById(alertFromAlertmanager.getFingerprint());
+                    for (Iterator<AlertManagerEntry> ii = allDatabasedMinusActive.iterator();ii.hasNext();) {
+                        AlertManagerEntry ame = ii.next();
+                        if (ame.getId().equals(alertFromAlertmanager.getFingerprint())) {
+                            ii.remove();
+                        }
+                    }
                 }
                 AlertManagerEntry databaseEntry;
                 if (alertFromDatabase.isPresent()) {
@@ -204,7 +212,7 @@ public class AlertIngester implements Ingester {
                         }
                     }
 
-                    allActiveMinusDatabased.remove(databaseEntry);
+                    allDatabasedMinusActive.remove(databaseEntry);
                 } else {
                     //log.debug("Creating entry with id "+id);
                     //log.debug("Aggregating fields "+fieldsToAggregate);
@@ -216,7 +224,7 @@ public class AlertIngester implements Ingester {
             }
 
             //process existing alerts that are not existing
-            for (AlertManagerEntry entry:allActiveMinusDatabased) {
+            for (AlertManagerEntry entry:allDatabasedMinusActive) {
                 if (!LogEntryStatus.RESOLVED.equals(entry.getStatus()) && amConfig.getName().equals(entry.getAlertmanager())) {
                     entry.setStatus(LogEntryStatus.RESOLVED);
                     entry.addNote("System", "Alert is now RESOLVED");
@@ -224,7 +232,6 @@ public class AlertIngester implements Ingester {
                 }
             }
 
-            //timeout resolved alerts
             //timeout resolved alerts
             LocalDateTime date = LocalDateTime.now().minusDays(7);
             Query query = new Query();
