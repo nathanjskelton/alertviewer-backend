@@ -145,8 +145,7 @@ public class AlertIngester implements Ingester {
 
             //process the incoming active alerts
             Set<String> groupLabels = env.getProperty("group.labels", HashSet.class);
-            Set<String> groupAnnotations = env.getProperty("group.annotations", HashSet.class);
-            Set<String> fieldsToAggregate = env.getProperty("group.fieldsToAggregate", HashSet.class);
+            Set<String> annotationsToAggregate = env.getProperty("group.annotationsToAggregate", HashSet.class);
             JSONArray data = json.getJSONArray("data");
             for (int i = 0;i < data.length();i++) {
                 String jsonAlert = data.getJSONObject(i).toString();
@@ -164,13 +163,7 @@ public class AlertIngester implements Ingester {
                         sb.append(alertFromAlertmanager.getLabels().get(s));
                     }
                 }
-                if ((groupAnnotations != null && groupAnnotations.size() > 0)) {
-                    if (sb.length() > 0) sb.append("_");
-                    sb.append("A:");
-                    for (String s : groupAnnotations) {
-                        sb.append(alertFromAlertmanager.getAnnotations().get(s));
-                    }
-                }
+
                 if (sb.length() > 0) {
                     group = true;
                     id = "GROUP:"+new String(MessageDigest.getInstance("MD5").digest(sb.toString().getBytes()));
@@ -215,8 +208,8 @@ public class AlertIngester implements Ingester {
                     allDatabasedMinusActive.remove(databaseEntry);
                 } else {
                     //log.debug("Creating entry with id "+id);
-                    //log.debug("Aggregating fields "+fieldsToAggregate);
-                    databaseEntry = new AlertManagerEntry(id, alertFromAlertmanager, fieldsToAggregate);
+                    //log.debug("Aggregating fields "+annotationsToAggregate);
+                    databaseEntry = new AlertManagerEntry(id, alertFromAlertmanager, annotationsToAggregate);
                     databaseEntry.addNote("System", "New alert imported from "+amConfig.getName());
                 }
                 databaseEntry.setAlertmanager(amConfig.getName());
