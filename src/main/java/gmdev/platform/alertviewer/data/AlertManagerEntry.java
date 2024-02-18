@@ -24,7 +24,6 @@ public class AlertManagerEntry {
 
     private String alertmanager;
 
-
     private List<Note> notes;
     @Indexed private LogEntryStatus status;
 
@@ -40,21 +39,18 @@ public class AlertManagerEntry {
 
     private Alert alert;
 
-    Set<String> fieldsToAggregate;
-
     Set<String> fingerprints = new HashSet<>();
 
 
-    public AlertManagerEntry(String id, Alert alert, Set<String> fieldsToAggregate) {
+    public AlertManagerEntry(String id, Alert alert) {
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
         friendlyStartTime = alert.getStartsAt().format(dtf);
         friendlyEndTime = alert.getEndsAt().format(dtf);
-
-        this.fieldsToAggregate = fieldsToAggregate;
         this.id = id;
         this.status = LogEntryStatus.NEW;
         notes = new ArrayList<>();
-        setAlert(alert);
+        this.alert = alert;
+        this.fingerprints.add(alert.getFingerprint());
     }
 
     public String getId() {
@@ -65,12 +61,13 @@ public class AlertManagerEntry {
         return alert;
     }
 
-    public boolean isGroup() {
-        return !alert.getFingerprint().equals(id);
+    public void setAlert(Alert alert) {
+        this.alert = alert;
+        this.fingerprints.add(alert.getFingerprint());
     }
 
-    public Set<String> getFieldsToAggregate() {
-        return fieldsToAggregate;
+    public boolean isGroup() {
+        return !alert.getFingerprint().equals(id);
     }
 
     public Set<String> getFingerprints() {
@@ -85,45 +82,9 @@ public class AlertManagerEntry {
         return friendlyEndTime;
     }
 
-    public void setAlert(Alert alert) {
-        if (this.fingerprints.contains(alert.getFingerprint())) {
-            //update it
-            this.alert.setEndsAt(alert.getEndsAt());
-            this.alert.setStartsAt(alert.getStartsAt());
-            this.alert.setReceivers(alert.getReceivers());
-            this.alert.setGeneratorURL(alert.getGeneratorURL());
-        } else {
-            //backward compatible to when service was an annotation
-            String serviceAnn = this.alert.getAnnotations().get("service");
-            String serviceLbl = this.alert.getLabels().get("service");
-            if (serviceAnn != null && !serviceAnn.isEmpty() && (serviceLbl == null || serviceLbl.isEmpty())) {
-                this.alert.getLabels().put("service", serviceAnn);
-            }
-            
-            //add it
-            if (this.alert != null && isGroup()) {
-                //log.debug("Aggregating alert: ");
-                Map<String, String> newAnnotations = new HashMap<>();
-                if (this.alert.getAnnotations() != null) {
-                    newAnnotations.putAll(this.alert.getAnnotations());
-                }
-                for (String f : fieldsToAggregate) {
-                    //log.debug("^ Aggregating field: " + f);
-                    String a = this.alert.getAnnotations().get(f);
-                    //log.debug("^ ..was: " + a);
-                    String na = alert.getAnnotations().get(f);
-                    if (na != null && !na.isEmpty()) {
-                        a = a + "\n" + na;
-                    }
-                    //log.debug("^ ...is: " + a);
-                    newAnnotations.put(f, a);
-                }
-                alert.setAnnotations(newAnnotations);
-            }
-            this.alert = alert;
-            this.fingerprints.add(this.alert.getFingerprint());
-        }
-    }
+
+
+
 
     public LogEntryStatus getStatus() {
         return status;

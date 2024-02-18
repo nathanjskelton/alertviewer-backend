@@ -35,6 +35,7 @@ import java.net.http.HttpRequest;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Component
@@ -158,15 +159,25 @@ public class AlertIngester implements Ingester {
                 String id = alertFromAlertmanager.getFingerprint();
                 StringBuilder sb = new StringBuilder();
                 if ((groupLabels != null && groupLabels.size() > 0)) {
-                    sb.append("L:");
                     for (String s : groupLabels) {
-                        sb.append(alertFromAlertmanager.getLabels().get(s));
+                        if (alertFromAlertmanager.getLabels().get(s) != null &&
+                                !alertFromAlertmanager.getLabels().get(s).isEmpty()) {
+                            sb.append(alertFromAlertmanager.getLabels().get(s));
+                            group = true;
+                        } else {
+                            group = false;
+                            break;
+                        }
                     }
                 }
 
-                if (sb.length() > 0) {
-                    group = true;
-                    id = "GROUP:"+new String(MessageDigest.getInstance("MD5").digest(sb.toString().getBytes()));
+                if (group) {
+                    //id = "GROUP:"+new String(MessageDigest.getInstance("MD5").digest(sb.toString().getBytes()));
+                    id = "GROUP:"+sb.toString();
+                    log.debug("***** " + id + " is a group");
+
+                } else {
+                    log.debug("***** " + id + " is not a group");
                 }
 
                 //log.debug("Looking for existing entry with id "+id);
@@ -183,9 +194,11 @@ public class AlertIngester implements Ingester {
                 }
                 AlertManagerEntry databaseEntry;
                 if (alertFromDatabase.isPresent()) {
-                    //log.debug("Found existing entry with id "+id);
+                    log.debug("**** - Found existing entry with id "+id);
                     databaseEntry = alertFromDatabase.get();
-                    databaseEntry.setAlert(alertFromAlertmanager);
+                    updateAlert(alertFromAlertmanager, databaseEntry, annotationsToAggregate);
+
+
                     if (LogEntryStatus.RESOLVED.equals(databaseEntry.getStatus())) {
                         databaseEntry.addNote("System", "Previously RESOLVED alert is now NEW");
                         databaseEntry.setStatus(LogEntryStatus.NEW);
@@ -207,9 +220,8 @@ public class AlertIngester implements Ingester {
 
                     allDatabasedMinusActive.remove(databaseEntry);
                 } else {
-                    //log.debug("Creating entry with id "+id);
-                    //log.debug("Aggregating fields "+annotationsToAggregate);
-                    databaseEntry = new AlertManagerEntry(id, alertFromAlertmanager, annotationsToAggregate);
+                    log.debug("**** + Creating entry with id "+id);
+                    databaseEntry = new AlertManagerEntry(id, alertFromAlertmanager);
                     databaseEntry.addNote("System", "New alert imported from "+amConfig.getName());
                 }
                 databaseEntry.setAlertmanager(amConfig.getName());
@@ -275,12 +287,60 @@ public class AlertIngester implements Ingester {
                     existingSilences.add(silence);
                 }
             }
-            log.debug("SILENCES ADDED: "+existingSilences.size());
+            //log.debug("SILENCES ADDED: "+existingSilences.size());
         } catch(Exception e) {
             log.error("Error reading silences from "+amConfig.getName(), e);
         }
         return existingSilences;
+    }
 
+    public void updateAlert(Alert newAlert, AlertManagerEntry alertToUpdate, Set<String> annotationsToAggregate) {
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
+
+
+        if (alertToUpdate.getId().equals(newAlert.getFingerprint())) {
+            log.debug("*** x Replace alert; this is not a group record: "+newAlert.getFingerprint());
+            alertToUpdate.setAlert(newAlert);
+
+        } else if (alertToUpdate.getFingerprints().contains(newAlert.getFingerprint())) {
+            log.debug("*** ^ Updating existing alert: "+ newAlert.getFingerprint());
+            //update it
+            alertToUpdate.getAlert().setEndsAt(newAlert.getEndsAt());
+            alertToUpdate.getAlert().setStartsAt(newAlert.getStartsAt());
+            alertToUpdate.getAlert().setReceivers(newAlert.getReceivers());
+            alertToUpdate.getAlert().setGeneratorURL(newAlert.getGeneratorURL());
+
+        } else {
+            log.debug("*** + Adding new alert to group: "+ newAlert.getFingerprint());
+            fixupAlert(newAlert);
+
+            //add it
+            Map<String, String> newAnnotations = new HashMap<>();
+            if (alertToUpdate.getAlert().getAnnotations() != null) {
+                newAnnotations.putAll(alertToUpdate.getAlert().getAnnotations());
+            }
+            for (String f : annotationsToAggregate) {
+                String existingAnnotation = "";
+                existingAnnotation = alertToUpdate.getAlert().getAnnotations().get(f);
+                String na = newAlert.getAnnotations().get(f);
+                if (na != null && !na.isEmpty()) {
+                    existingAnnotation = existingAnnotation + "\n" + "[" + newAlert.getStartsAt() + "] " + na;
+                }
+
+                newAnnotations.put(f, existingAnnotation);
+            }
+            newAlert.setAnnotations(newAnnotations);
+            alertToUpdate.setAlert(newAlert);
+        }
+    }
+
+    private void fixupAlert(Alert alert) {
+        //backward compatible to when service was an annotation
+        String serviceAnn = alert.getAnnotations().get("service");
+        String serviceLbl = alert.getLabels().get("service");
+        if (serviceAnn != null && !serviceAnn.isEmpty() && (serviceLbl == null || serviceLbl.isEmpty())) {
+            alert.getLabels().put("service", serviceAnn);
+        }
     }
 
 }
