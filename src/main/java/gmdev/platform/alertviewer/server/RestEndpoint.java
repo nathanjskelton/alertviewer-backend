@@ -3,8 +3,8 @@ package gmdev.platform.alertviewer.server;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import gmdev.platform.alertviewer.data.AlertManagerEntry;
-import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
+import gmdev.platform.alertviewer.data.alert.AlertManagerEntry;
+import gmdev.platform.alertviewer.data.alert.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.data.AlertManagerUser;
 import gmdev.platform.alertviewer.data.jira.WraithGeneric;
 import gmdev.platform.alertviewer.data.silence.Silence;
@@ -31,6 +31,8 @@ import java.io.ByteArrayInputStream;
 import java.net.URLDecoder;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @RestController
 public class RestEndpoint {
@@ -295,6 +297,12 @@ public class RestEndpoint {
         }
     }
 
+    private boolean match(String search, String find) {
+        Pattern pattern = Pattern.compile(find, Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(search);
+        return matcher.find();
+    }
+
     @PostMapping(value = "/jira", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ServiceResponse<Void>> jira(@RequestHeader("CORTANA-TOKEN") String token,
                                                       @RequestBody String payload) {
@@ -307,8 +315,15 @@ public class RestEndpoint {
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.registerModule(new JavaTimeModule());
             WraithGeneric jira = objectMapper.readValue(payload, WraithGeneric.class);
-
             String newJson = objectMapper.writeValueAsString(jira);
+
+            if (match(jira.getSystem(), "volt")) jira.setEnvironment("HCI VOLT");
+            else if (match(jira.getSystem(), "fantasy")) jira.setEnvironment("FANTASY");
+            else if (match(jira.getSystem(), "halo")) jira.setEnvironment("HALO");
+            else if (match(jira.getSystem(), "place")) jira.setEnvironment("PLACE");
+            else if (match(jira.getSystem(), "titan")) jira.setEnvironment("TITAN");
+            else if (match(jira.getSystem(), "amp")) jira.setEnvironment("AMP");
+            else if (match(jira.getSystem(), "quest")) jira.setEnvironment("QUEST");
 
             java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
             HttpRequest request = HttpRequest.newBuilder()

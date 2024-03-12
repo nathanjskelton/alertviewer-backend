@@ -10,6 +10,10 @@ public class WraithGeneric {
 
     private String description;
 
+    private String environment;
+
+    private String system;
+
     public String getId() {
         return id;
     }
@@ -34,4 +38,19 @@ public class WraithGeneric {
         this.description = description;
     }
 
+    public String getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(String environment) {
+        this.environment = environment;
+    }
+
+    public String getSystem() {
+        return system;
+    }
+
+    public void setSystem(String system) {
+        this.system = system;
+    }
 }

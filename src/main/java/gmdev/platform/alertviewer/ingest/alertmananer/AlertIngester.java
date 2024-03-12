@@ -6,10 +6,11 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import gmdev.platform.alertviewer.data.AlertManagerConfig;
-import gmdev.platform.alertviewer.data.AlertManagerEntry;
-import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
+import gmdev.platform.alertviewer.data.alert.AlertManagerEntry;
+import gmdev.platform.alertviewer.data.alert.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.data.MetaDataHelper;
 import gmdev.platform.alertviewer.data.alert.Alert;
+import gmdev.platform.alertviewer.data.alert.AlertRepo;
 import gmdev.platform.alertviewer.data.silence.Silence;
 import gmdev.platform.alertviewer.ingest.Ingester;
 import gmdev.platform.alertviewer.server.CustomDateDeserializer;
@@ -33,15 +34,17 @@ import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 
 @Component
 @ConditionalOnProperty(value = "ingester.type", havingValue = "alertmanager")
 public class AlertIngester implements Ingester {
 
     private static final Logger log = LoggerFactory.getLogger(AlertIngester.class);
+
+    static DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
+
 
     @Autowired
     Environment env;
@@ -57,6 +60,9 @@ public class AlertIngester implements Ingester {
 
     @Autowired
     AlertManagerEntryRepo repo;
+
+    @Autowired
+    AlertRepo alertRepo;
 
     @Autowired
     StateBuffer state;
@@ -151,11 +157,27 @@ public class AlertIngester implements Ingester {
                 objectMapper.registerModule(new JavaTimeModule());
                 objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
                 Alert alertFromAlertmanager = objectMapper.readValue(jsonAlert, Alert.class);
+                LocalDateTime dt = LocalDateTime.now();
+                alertFromAlertmanager.setFriendlyIngestTime(dtf.format(dt));
+                alertFromAlertmanager.setIngestTime(dt);
+                alertFromAlertmanager.calculateAnnotationHash();
+                alertFromAlertmanager.setAlertmanager(amConfig.getName());
+
+                Optional<Alert> o = alertRepo.findByFingerprintAndAnnotationHash(alertFromAlertmanager.getFingerprint(), alertFromAlertmanager.getAnnotationHash());
+
+                if (o.isEmpty()) {
+                    log.debug("Saving alert with fingerprint=" + alertFromAlertmanager.getFingerprint() + " and hash=" + alertFromAlertmanager.getAnnotationHash());
+                    alertRepo.save(alertFromAlertmanager);
+                } else {
+                    log.debug("NOT Saving alert with fingerprint=" + alertFromAlertmanager.getFingerprint() + " and hash=" + alertFromAlertmanager.getAnnotationHash());
+                    log.debug(o.get().toString());
+                }
+
                 Optional<AlertManagerEntry> alertFromDatabase = repo.findByIdAndAlertmanager(alertFromAlertmanager.getFingerprint(), amConfig.getName());
                 AlertManagerEntry databaseEntry;
                 if (alertFromDatabase.isPresent()) {
                     databaseEntry = alertFromDatabase.get();
-                    databaseEntry.setAlert(alertFromAlertmanager);
+                    if (o.isEmpty()) databaseEntry.addAlert(alertFromAlertmanager, amConfig.getName());
                     if (LogEntryStatus.RESOLVED.equals(databaseEntry.getStatus())) {
                         databaseEntry.addNote("System", "Previously RESOLVED alert is now NEW");
                         databaseEntry.setStatus(LogEntryStatus.NEW);
@@ -177,7 +199,7 @@ public class AlertIngester implements Ingester {
 
                     allActiveMinusDatabased.remove(databaseEntry);
                 } else {
-                    databaseEntry = new AlertManagerEntry(alertFromAlertmanager);
+                    databaseEntry = new AlertManagerEntry(alertFromAlertmanager, amConfig.getName());
                     databaseEntry.addNote("System", "New alert imported from "+amConfig.getName());
                 }
                 databaseEntry.setAlertmanager(amConfig.getName());
@@ -244,7 +266,7 @@ public class AlertIngester implements Ingester {
                     existingSilences.add(silence);
                 }
             }
-            log.debug("SILENCES ADDED: "+existingSilences.size());
+            //log.debug("SILENCES ADDED: "+existingSilences.size());
         } catch(Exception e) {
             log.error("Error reading silences from "+amConfig.getName(), e);
         }

@@ -2,9 +2,8 @@ package gmdev.platform.alertviewer.server;
 
 import com.mongodb.client.DistinctIterable;
 import com.mongodb.client.model.Filters;
-import gmdev.platform.alertviewer.data.AlertManagerEntry;
+import gmdev.platform.alertviewer.data.alert.AlertManagerEntry;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
-import org.bson.BsonDocument;
 import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

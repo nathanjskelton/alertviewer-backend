@@ -1,18 +1,16 @@
-package gmdev.platform.alertviewer.data;
+package gmdev.platform.alertviewer.data.alert;
 
+import gmdev.platform.alertviewer.data.Note;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
-import gmdev.platform.alertviewer.data.alert.Alert;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 @Document(collection = "AlertManagerEntry")
 public class AlertManagerEntry {
@@ -20,32 +18,30 @@ public class AlertManagerEntry {
     @Id
     private String id;
 
-
-    private String alertmanager;
-
+    private String alertmanager = null;
 
     private List<Note> notes;
     @Indexed private LogEntryStatus status;
-
-    private boolean regex = false;
 
     private boolean acked = false;
 
     private boolean flapping = false;
 
-    private String friendlyStartTime;
+    private LocalDateTime start = LocalDateTime.now();
 
-    private String friendlyEndTime;
+    private LocalDateTime end = LocalDateTime.now().plusMinutes(5);
 
-    private Alert alert;
+    static DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
 
-    public AlertManagerEntry(Alert alert) {
-        this.alert = alert;
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
-        friendlyStartTime = alert.getStartsAt().format(dtf);
-        friendlyEndTime = alert.getEndsAt().format(dtf);
+    @DBRef
+    private Set<Alert> alerts = new TreeSet<>();
 
+    private AlertManagerEntry() {
+    }
+ 
+    public AlertManagerEntry(Alert alert, String alertmanager) {
         this.id = alert.getFingerprint();
+        addAlert(alert, alertmanager);
         this.status = LogEntryStatus.NEW;
         notes = new ArrayList<>();
     }
@@ -54,22 +50,44 @@ public class AlertManagerEntry {
         return id;
     }
 
+    //get the first alert which has the labels and values but no annotations
     public Alert getAlert() {
-        return alert;
+        Optional<Alert> a = alerts.stream().findFirst();
+        return a.orElse(null);
+    }
+
+    public Collection<Alert> getAlerts() {
+        return alerts;
     }
 
     public String getFriendlyStartTime() {
-        return friendlyStartTime;
+        return dtf.format(start);
     }
 
     public String getFriendlyEndTime() {
-        return friendlyEndTime;
+        return dtf.format(end);
     }
 
-    public void setAlert(Alert alert) {
-        if (!alert.getFingerprint().equals(this.id)) {throw new RuntimeException("Fingerprint mismatch:\n"+
-                this.id+">>>\n"+this.alert.toString()+"\n\n"+alert.getFingerprint()+">>>\n"+alert.toString());}
-        this.alert = alert;
+    public void addAlert(Alert alert, String alertmanager) {
+        if (!alert.getFingerprint().equals(this.id) || (this.alertmanager != null && !this.alertmanager.equals(alertmanager))) {
+            throw new RuntimeException("Fingerprint or Alertmanager mismatch: "+this.id+" != "+alert.getFingerprint());
+        }
+
+        this.alertmanager = alertmanager;
+        String gm = alert.getLabels().get("gm_instance");
+        if (gm == null || gm.isEmpty()) {
+            gm = alertmanager;
+            alert.getLabels().put("gm_instance", gm);
+            alert.setInstanceInferred(true);
+        }
+
+        if (alert.getStartsAt().isBefore(start)) {
+            start = alert.getStartsAt();
+        }
+        if (alert.getEndsAt().isAfter(end)) {
+            end = alert.getEndsAt();
+        }
+        this.alerts.add(alert);
     }
 
     public LogEntryStatus getStatus() {
@@ -110,18 +128,11 @@ public class AlertManagerEntry {
         notes.add(note);
     }
 
-    public boolean isRegex() {
-        return regex;
-    }
-
-    public void setRegex(boolean regex) {
-        this.regex = regex;
-    }
 
 
     public String getDuration() {
 
-        Duration duration = Duration.between(alert.getStartsAt(), alert.getEndsAt());
+        Duration duration = Duration.between(start, end);
 
         long DD = duration.toDays();
         long HH = duration.toHoursPart();
@@ -144,12 +155,6 @@ public class AlertManagerEntry {
 
     public void setAlertmanager(String alertmanager) {
         this.alertmanager = alertmanager;
-        String gm = alert.getLabels().get("gm_instance");
-        if (gm == null || gm.isEmpty()) {
-            gm = alertmanager;
-            alert.getLabels().put("gm_instance", gm);
-            alert.getAnnotations().put("gm_instance_from_am", "true");
-        }
     }
 
     @Override
@@ -165,11 +170,11 @@ public class AlertManagerEntry {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         AlertManagerEntry that = (AlertManagerEntry) o;
-        return Objects.equals(alertmanager, that.alertmanager) && Objects.equals(alert, that.alert);
+        return Objects.equals(id, that.id) && Objects.equals(alertmanager, that.alertmanager);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(alertmanager, alert);
+        return Objects.hash(id, alertmanager);
     }
 }

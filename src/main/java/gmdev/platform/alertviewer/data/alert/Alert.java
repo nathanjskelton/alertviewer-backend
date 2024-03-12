@@ -1,21 +1,49 @@
 package gmdev.platform.alertviewer.data.alert;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import gmdev.platform.alertviewer.ingest.LocalDateTimeDeserializer;
+import gmdev.platform.alertviewer.ingest.alertmananer.AlertIngester;
+import org.apache.commons.logging.Log;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.web.bind.annotation.PostMapping;
 
+import javax.annotation.PostConstruct;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 @Document(collection = "Alert")
-public class Alert {
+public class Alert implements Comparable<Alert> {
+    private static final Logger log = LoggerFactory.getLogger(Log.class);
+
+    static MessageDigest digester;
+
+    static {
+        try {
+            digester = MessageDigest.getInstance("MD5");
+        } catch (Exception e) {
+            throw new RuntimeException("*** FATAL ERROR CONSTRUCTING DIGESTER, CANNOT CREATE ALERT ***");
+        }
+    }
+
+    private static final Object MUTEX = new Object();
+
+
+    @Id
+    String id;
+
 
     Map<String, String> labels;
 
-    Map<String, String> annotations;
+    @JsonProperty
+    Map<String, String> annotations = new HashMap<>();
+
+    String annotationHash;
 
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
     @JsonDeserialize(using = LocalDateTimeDeserializer.class)
@@ -29,12 +57,22 @@ public class Alert {
 
     AlertStatus status;
 
+    boolean instanceInferred = false;
+
+    String alertmanager;
+
     Set<String> receivers;
 
     String fingerprint;
 
+    LocalDateTime ingestTime;
+
+    String friendlyIngestTime;
+
     public Alert() {
+        this.id = UUID.randomUUID().toString();
     }
+    
 
     public Map<String, String> getLabels() {
         return labels;
@@ -44,12 +82,51 @@ public class Alert {
         this.labels = labels;
     }
 
-    public Map<String, String> getAnnotations() {
-        return annotations;
+    public Iterator<String> getAnnotationKeys() {
+        synchronized (MUTEX) {
+            return this.annotations.keySet().iterator();
+        }
     }
 
-    public void setAnnotations(Map<String, String> annotations) {
-        this.annotations = annotations;
+    public void setAlertmanager(String alertmanager) {
+        this.alertmanager = alertmanager;
+    }
+
+    public String getAlertmanager() {
+        return alertmanager;
+    }
+
+    public String getAnnotation(String key) {
+        synchronized (MUTEX) {
+            return this.annotations.get(key);
+        }
+    }
+
+
+    public void setFriendlyIngestTime(String ingestTime) {
+        this.friendlyIngestTime = ingestTime;
+    }
+
+
+    public String getFriendlyIngestTime() {
+        return friendlyIngestTime;
+    }
+
+    public void setIngestTime(LocalDateTime ingestTime) {
+        this.ingestTime = ingestTime;
+    }
+
+
+    public LocalDateTime getIngestTime() {
+        return ingestTime;
+    }
+
+    public boolean isInstanceInferred() {
+        return instanceInferred;
+    }
+
+    public void setInstanceInferred(boolean instanceInferred) {
+        this.instanceInferred = instanceInferred;
     }
 
     public LocalDateTime getStartsAt() {
@@ -96,8 +173,9 @@ public class Alert {
         return fingerprint;
     }
 
-    public void setFingerprint(String fingerprint) {
-        this.fingerprint = fingerprint;
+    public String getAnnotationHash() {
+        log.debug("getAnnotationHash returning "+ annotationHash);
+        return annotationHash;
     }
 
     @Override
@@ -105,12 +183,24 @@ public class Alert {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Alert alert = (Alert) o;
-        return Objects.equals(fingerprint, alert.fingerprint);
+        return Objects.equals(annotationHash, alert.annotationHash) && Objects.equals(fingerprint, alert.fingerprint);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(fingerprint);
+        return Objects.hash(annotationHash, fingerprint);
+    }
+
+    public void calculateAnnotationHash() {
+        synchronized (MUTEX) {
+            log.debug("calculateAnnotationHash");
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<String, String> entry : annotations.entrySet()) {
+                sb.append(entry.getKey());
+                sb.append(entry.getValue());
+            }
+            annotationHash = new String(digester.digest(sb.toString().getBytes()));
+        }
     }
 
     @Override
@@ -125,5 +215,11 @@ public class Alert {
                 ", receivers=" + receivers +
                 ", fingerprint='" + fingerprint + '\'' +
                 '}';
+    }
+
+
+    @Override
+    public int compareTo(Alert alert) {
+        return ingestTime.compareTo(alert.ingestTime);
     }
 }

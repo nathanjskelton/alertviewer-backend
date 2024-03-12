@@ -1,11 +1,10 @@
 package gmdev.platform.alertviewer.server;
 
-import gmdev.platform.alertviewer.data.AlertManagerEntry;
+import gmdev.platform.alertviewer.data.alert.AlertManagerEntry;
 import gmdev.platform.alertviewer.data.silence.Silence;
 
 import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 
 public class RequestResponse {
 
@@ -49,9 +48,9 @@ public class RequestResponse {
         content.append("\n");
         content.append("```");
         content.append("\n");
-        content.append(entry.getAlert().getLabels().get("alertname"));
+        //content.append(entry.getAlert().getLabels().get("alertname"));
         content.append("\n");
-        content.append(entry.getAlert().getAnnotations().get("summary"));
+        //content.append(entry.getAlert().getAnnotations().get("summary"));
         content.append("\n");
         content.append("```");
         content.append("\n");
