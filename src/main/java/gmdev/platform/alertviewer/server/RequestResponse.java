@@ -5,12 +5,13 @@ import gmdev.platform.alertviewer.data.silence.Silence;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class RequestResponse {
 
     private boolean export;
-    private List<AlertManagerEntry> entries;
+    private Map<String, List<AlertManagerEntry>> entries;
 
     private List<String> alertmanagers;
 
@@ -22,10 +23,15 @@ public class RequestResponse {
 
     private List<String> severities;
 
-    public RequestResponse(List<AlertManagerEntry> list, Collection<Silence> silences, List<String> instances,
-                           List<String> severities, List<String> alertmanagers, boolean export) {
+    private Set<String> allFields;
+
+    public RequestResponse(Map<String, List<AlertManagerEntry>> map, Collection<Silence> silences, List<String> instances,
+                           List<String> severities, List<String> alertmanagers, Set<String> allFields, boolean export) {
         this.export = export;
         content = new StringBuilder();
+
+        //TODO export
+        /*
         if (export) {
             for (AlertManagerEntry entry:list) {
                 addEntry(entry);
@@ -33,10 +39,14 @@ public class RequestResponse {
         } else {
             entries =list;
         }
+        */
+
+        this.entries = map;
         this.instances = instances;
         this.severities = severities;
         this.silences = silences;
         this.alertmanagers = alertmanagers;
+        this.allFields = allFields;
     }
 
     private void addEntry(AlertManagerEntry entry) {
@@ -57,7 +67,7 @@ public class RequestResponse {
         content.append("\n");
     }
 
-    public List<AlertManagerEntry> getEntries() {
+    public Map<String, List<AlertManagerEntry>> getEntries() {
         return entries;
     }
 
@@ -83,5 +93,9 @@ public class RequestResponse {
 
     public List<String> getAlertmanagers() {
         return alertmanagers;
+    }
+
+    public Set<String> getAllFields() {
+        return allFields;
     }
 }

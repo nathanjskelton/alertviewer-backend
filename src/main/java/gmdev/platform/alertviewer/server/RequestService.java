@@ -17,8 +17,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -34,7 +33,7 @@ public class RequestService {
 
 
     public RequestResponse request(List<String> severity, String start, String end,
-                                   List<String> statusStrings, List<String> gminstances, boolean export)
+                                   List<String> statusStrings, List<String> gminstances, String groupField, boolean export)
             throws ServiceException {
 
         log.debug("start="+start+", end="+end);
@@ -155,6 +154,41 @@ public class RequestService {
         query.with(Sort.by(Sort.Direction.DESC, "alert.startsAt"));
         log.debug("QUERY: "+query.toString());
         List<AlertManagerEntry> list = mongo.find(query, AlertManagerEntry.class);
+        Set<String> allFields = new TreeSet<>();
+
+        //group by groupfield if specified
+        //TODO remove this when receiving multple fields
+        Set<String> groupFields = new LinkedHashSet<>();
+        groupFields.add(groupField);
+
+        Map<String, List<AlertManagerEntry>> map = new HashMap<>();
+        if (groupField != null && !groupField.isEmpty()) {
+            for (AlertManagerEntry alert:list) {
+                StringBuilder sb = new StringBuilder();
+                String dd = "";
+                for (String gf:groupFields) {
+                    if (alert.getAlert().getLabels().containsKey(gf)) {
+                        sb.append(dd);
+                        sb.append(gf + ": " + alert.getAlert().getAnnotations().get(gf));
+                        dd = ", ";
+                    } else {
+                        sb.append(dd);
+                        sb.append(gf + ": UNDEFINED");
+                        dd = ", ";
+                    }
+                    if (!map.containsKey(sb.toString())) map.put(sb.toString(), new ArrayList<>());
+                    List<AlertManagerEntry> amelist = map.get(sb.toString());
+                    amelist.add(alert);
+                }
+            }
+        } else {
+            map.put("ALL", list);
+        }
+
+        //get the distinct set of labels for group dropdown
+        for (AlertManagerEntry alert:list) {
+            allFields.addAll(alert.getAlert().getLabels().keySet());
+        }
 
         List<String> inst = StreamSupport.stream(instances.spliterator(), false)
             .collect(Collectors.toList());
@@ -164,6 +198,6 @@ public class RequestService {
 
         List<String> seve = StreamSupport.stream(severities.spliterator(), false)
                 .collect(Collectors.toList());
-        return new RequestResponse(list, state.getSilences(), inst, seve, state.getAlertmanagerNames(), export);
+        return new RequestResponse(map, state.getSilences(), inst, seve, state.getAlertmanagerNames(), allFields, export);
     }
 }

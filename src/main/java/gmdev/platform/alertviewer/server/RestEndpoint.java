@@ -93,7 +93,7 @@ public class RestEndpoint {
                           @RequestParam(required = false,value = "start")String start,
                           @RequestParam(required = false,value = "end")String end,
                           @RequestParam(required = false,value = "statuses")List<String> statuses,
-                          @RequestParam(required = false,value = "gminstances")List<String> gminstances,
+                          @RequestParam(required = false,value = "gmInstances")List<String> gmInstances,
                           HttpServletResponse response) {
 
         if (!state.isValidSession(token)) {
@@ -103,7 +103,7 @@ public class RestEndpoint {
 
         response.setHeader("Content-Disposition", "attachment; filename=export.txt");
         try {
-            return requestService.request(severity, start, end, statuses, gminstances, true).getContent();
+            return requestService.request(severity, start, end, statuses, gmInstances, null, true).getContent();
         } catch (ServiceException e) {
             log.error("Export error: "+e.getMessage(), e);
             return "ERROR: "+e.getMessage();
@@ -117,7 +117,8 @@ public class RestEndpoint {
                                     @RequestParam(required = false,value = "start")String start,
                                     @RequestParam(required = false,value = "end")String end,
                                     @RequestParam(required = false,value = "statuses")List<String> statuses,
-                                    @RequestParam(required = false,value = "gminstances")List<String> gminstances) {
+                                    @RequestParam(required = false,value = "groupField")String groupField,
+                                    @RequestParam(required = false,value = "gmInstances")List<String> gmInstances) {
 
         try {
             if (!state.isValidSession(token)) {
@@ -125,7 +126,7 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
             log.debug("Query: statuses="+statuses);
-            return new ResponseEntity<>(new ServiceResponse<>("Query complete", requestService.request(severity, start, end, statuses, gminstances, false)), HttpStatus.OK);
+            return new ResponseEntity<>(new ServiceResponse<>("Query complete", requestService.request(severity, start, end, statuses, gmInstances, groupField, false)), HttpStatus.OK);
         } catch (ServiceException e) {
             log.error("Request error: "+e.getMessage(), e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
