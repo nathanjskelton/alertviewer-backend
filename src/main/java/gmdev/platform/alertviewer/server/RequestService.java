@@ -169,7 +169,7 @@ public class RequestService {
                 for (String gf:groupFields) {
                     if (alert.getAlert().getLabels().containsKey(gf)) {
                         sb.append(dd);
-                        sb.append(gf + ": " + alert.getAlert().getAnnotations().get(gf));
+                        sb.append(gf + ": " + alert.getAlert().getLabels().get(gf));
                         dd = ", ";
                     } else {
                         sb.append(dd);
