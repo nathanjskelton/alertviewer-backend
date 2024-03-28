@@ -1,5 +1,6 @@
 package gmdev.platform.alertviewer.server;
 
+import gmdev.platform.alertviewer.data.AlertGroup;
 import gmdev.platform.alertviewer.data.AlertManagerEntry;
 import gmdev.platform.alertviewer.data.silence.Silence;
 
@@ -11,7 +12,7 @@ import java.util.Set;
 public class RequestResponse {
 
     private boolean export;
-    private Map<String, List<AlertManagerEntry>> entries;
+    private Map<String, AlertGroup> entries;
 
     private List<String> alertmanagers;
 
@@ -25,7 +26,7 @@ public class RequestResponse {
 
     private Set<String> allFields;
 
-    public RequestResponse(Map<String, List<AlertManagerEntry>> map, Collection<Silence> silences, List<String> instances,
+    public RequestResponse(Map<String, AlertGroup> map, Collection<Silence> silences, List<String> instances,
                            List<String> severities, List<String> alertmanagers, Set<String> allFields, boolean export) {
         this.export = export;
         content = new StringBuilder();
@@ -67,7 +68,7 @@ public class RequestResponse {
         content.append("\n");
     }
 
-    public Map<String, List<AlertManagerEntry>> getEntries() {
+    public Map<String, AlertGroup> getEntries() {
         return entries;
     }
 

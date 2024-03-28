@@ -2,6 +2,7 @@ package gmdev.platform.alertviewer.server;
 
 import com.mongodb.client.DistinctIterable;
 import com.mongodb.client.model.Filters;
+import gmdev.platform.alertviewer.data.AlertGroup;
 import gmdev.platform.alertviewer.data.AlertManagerEntry;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
 import org.bson.BsonDocument;
@@ -157,11 +158,11 @@ public class RequestService {
         Set<String> allFields = new TreeSet<>();
 
         //group by groupfield if specified
-        //TODO remove this when receiving multple fields
+        //TODO remove this when receiving multiple fields
         Set<String> groupFields = new LinkedHashSet<>();
         groupFields.add(groupField);
 
-        Map<String, List<AlertManagerEntry>> map = new HashMap<>();
+        Map<String, AlertGroup> map = new HashMap<>();
         if (groupField != null && !groupField.isEmpty()) {
             for (AlertManagerEntry alert:list) {
                 StringBuilder sb = new StringBuilder();
@@ -176,13 +177,13 @@ public class RequestService {
                         sb.append(gf + ": UNDEFINED");
                         dd = ", ";
                     }
-                    if (!map.containsKey(sb.toString())) map.put(sb.toString(), new ArrayList<>());
-                    List<AlertManagerEntry> amelist = map.get(sb.toString());
-                    amelist.add(alert);
+                    if (!map.containsKey(sb.toString())) map.put(sb.toString(), new AlertGroup());
+                    AlertGroup group = map.get(sb.toString());
+                    group.add(alert);
                 }
             }
         } else {
-            map.put("ALL", list);
+            map.put("ALL", new AlertGroup(list));
         }
 
         //get the distinct set of labels for group dropdown
