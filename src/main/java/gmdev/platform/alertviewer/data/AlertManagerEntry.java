@@ -39,6 +39,8 @@ public class AlertManagerEntry {
 
     private Alert alert;
 
+    private long lastChange = 0L;
+
     public AlertManagerEntry(Alert alert) {
         this.alert = alert;
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
@@ -72,11 +74,20 @@ public class AlertManagerEntry {
         this.alert = alert;
     }
 
+    public long getLastChange() {
+        return lastChange;
+    }
+
+    public void setLastChange(long lastChange) {
+        this.lastChange = lastChange;
+    }
+
     public LogEntryStatus getStatus() {
         return status;
     }
 
     public void setStatus(LogEntryStatus status) {
+        lastChange = System.currentTimeMillis();
         this.status = status;
     }
 

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.mongodb.client.result.DeleteResult;
 import gmdev.platform.alertviewer.data.AlertManagerConfig;
 import gmdev.platform.alertviewer.data.AlertManagerEntry;
 import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
@@ -32,7 +33,9 @@ import java.net.URI;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -127,6 +130,11 @@ public class AlertIngester implements Ingester {
         return json;
     }
 
+    private boolean isFlappingExpired(AlertManagerEntry entry) {
+        Instant i = Instant.ofEpochMilli(entry.getLastChange());
+        return i.isBefore(Instant.now().minus(Duration.ofMinutes(Integer.parseInt(env.getProperty("flapping.timeout.minutes", "15")))));
+    }
+
     public void ingest(AlertManagerConfig amConfig) {
         log.info("AlertManager Ingester running for alertmanager "+amConfig.getName());
         state.getAlertManagersAll().add(amConfig.getName());
@@ -156,22 +164,55 @@ public class AlertIngester implements Ingester {
                 if (alertFromDatabase.isPresent()) {
                     databaseEntry = alertFromDatabase.get();
                     databaseEntry.setAlert(alertFromAlertmanager);
+
+                    //RESOLVED alert firing again...
                     if (LogEntryStatus.RESOLVED.equals(databaseEntry.getStatus())) {
                         databaseEntry.addNote("System", "Previously RESOLVED alert is now NEW");
                         databaseEntry.setStatus(LogEntryStatus.NEW);
-                        if (!databaseEntry.isAcked()) {
+
+                        //is it flapping?
+                        if (!databaseEntry.isAcked() && !isFlappingExpired(databaseEntry)) {
+                            databaseEntry.addNote("System", "Alert is FLAPPING");
+                            log.info("Firing alert "+databaseEntry.getId()+" is flapping");
                             databaseEntry.setFlapping(true);
+                        } else if (isFlappingExpired(databaseEntry)) {
+                            log.debug("Firing alert "+databaseEntry.getId()+", which was RESOLVED, is not flapping due to time elapsed");
                         }
                     }
+
+                    //firing alert is suppressed...
                     if ("suppressed".equals(alertFromAlertmanager.getStatus().getState())) {
                         if (!LogEntryStatus.SILENCED.equals(databaseEntry.getStatus())) {
                             databaseEntry.addNote("System", "Alert is SILENCED");
                             databaseEntry.setStatus(LogEntryStatus.SILENCED);
+                            if (databaseEntry.isFlapping()) {
+                                log.info("Silenced alert " + databaseEntry.getId() + " is no longer flapping(1)");
+                                databaseEntry.addNote("System", "Alert is no longer FLAPPING");
+                                databaseEntry.setFlapping(false);
+                            }
                         }
+
+                    //SILENCED alert is no longer suppressed...
                     } else if (LogEntryStatus.SILENCED.equals(databaseEntry.getStatus())) {
                         if (!"suppressed".equals(alertFromAlertmanager.getStatus().getState())) {
                             databaseEntry.addNote("System", "Previously SILENCED alert is now NEW");
                             databaseEntry.setStatus(LogEntryStatus.NEW);
+                            if (databaseEntry.isFlapping()) {
+                                log.info("Firing alert " + databaseEntry.getId() + " is no longer flapping(2)");
+                                databaseEntry.addNote("System", "Alert is no longer FLAPPING");
+                                databaseEntry.setFlapping(false);
+                            }
+                        }
+
+                    //NEW alert is still firing...
+                    } else if (LogEntryStatus.NEW.equals(databaseEntry.getStatus())) {
+                        //should flapping be cleared?
+                        if (isFlappingExpired(databaseEntry) && databaseEntry.isFlapping()) {
+                            log.info("Firing alert "+databaseEntry.getId()+" is no longer flapping(3)");
+                            databaseEntry.addNote("System", "Alert is no longer FLAPPING");
+                            databaseEntry.setFlapping(false);
+                        //} else {
+                            //log.debug("Firing alert "+databaseEntry.getId()+" is still flapping");
                         }
                     }
 
@@ -187,20 +228,31 @@ public class AlertIngester implements Ingester {
             //process existing alerts that are not existing
             for (AlertManagerEntry entry:allActiveMinusDatabased) {
                 if (!LogEntryStatus.RESOLVED.equals(entry.getStatus()) && amConfig.getName().equals(entry.getAlertmanager())) {
-                    entry.setStatus(LogEntryStatus.RESOLVED);
-                    entry.addNote("System", "Alert is now RESOLVED");
-                    repo.save(entry);
+                    if (LogEntryStatus.NEW.equals(entry.getStatus()) && entry.isFlapping() && !isFlappingExpired(entry)) {
+                        log.debug("Firing alert "+entry.getId()+" is resolved but is flapping, keep it as new");
+                        entry.setFlapping(true);
+                    } else {
+                        entry.setStatus(LogEntryStatus.RESOLVED);
+                        if (entry.isFlapping()) {
+                            log.info("Resolved alert "+entry.getId()+" is no longer flapping(4)");
+                            entry.addNote("System", "Alert is no longer FLAPPING");
+                            entry.setFlapping(false);
+                        }
+                        entry.addNote("System", "Alert is now RESOLVED");
+                        repo.save(entry);
+                    }
                 }
             }
 
             //timeout resolved alerts
-            //timeout resolved alerts
-            LocalDateTime date = LocalDateTime.now().minusDays(7);
+            LocalDateTime date = LocalDateTime.now().minusMinutes(Integer.parseInt(env.getProperty("resolved.remove.minutes", "10080")));
             Query query = new Query();
             Criteria criteria = Criteria.where("status").is(LogEntryStatus.RESOLVED).andOperator(Criteria.where("alert.endsAt").lte(date));
             query.addCriteria(criteria);
-            mongo.remove(query, AlertManagerEntry.class);
-
+            DeleteResult dr = mongo.remove(query, AlertManagerEntry.class);
+            if (dr.getDeletedCount() > 0) {
+                log.info(dr.getDeletedCount() + " RESOLVED alerts were deleted after "+env.getProperty("resolved.remove.minutes", "10080")+" minutes");
+            }
             state.getAlertManagersUp().add(amConfig.getName());
 
         } catch(Exception e) {
@@ -244,7 +296,7 @@ public class AlertIngester implements Ingester {
                     existingSilences.add(silence);
                 }
             }
-            log.debug("SILENCES ADDED: "+existingSilences.size());
+            //log.debug("SILENCES ADDED: "+existingSilences.size());
         } catch(Exception e) {
             log.error("Error reading silences from "+amConfig.getName(), e);
         }
