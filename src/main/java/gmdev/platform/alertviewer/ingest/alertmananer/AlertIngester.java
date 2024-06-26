@@ -35,7 +35,6 @@ import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -74,6 +73,9 @@ public class AlertIngester implements Ingester {
         state.setSilences(silences);
     }
 
+    public void test() {
+        System.out.println("************* This is a test *************");
+    }
 
     private JSONObject sendRequest(AlertManagerConfig amConfig, HttpRequest request) {
         JSONObject json = null;

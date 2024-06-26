@@ -18,7 +18,6 @@ public class UserService {
     @Autowired MongoTemplate mongo;
     @Autowired Environment env;
     @Autowired AlertManagerUserRepo repo;
-    @Autowired StateBuffer state;
 
 
     public UsersResponse getUsers() throws ServiceException {
