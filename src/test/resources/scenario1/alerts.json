@@ -1,0 +1,55 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "labels": {
+        "alertname": "Alert Name 001",
+        "gm_instance": "PROM2",
+        "instance": "nginx:80",
+        "job": "custom",
+        "severity": "warning",
+        "team": "team1"
+      },
+      "annotations": {
+        "summary": "alert001 is > 0"
+      },
+      "startsAt": "2024-06-27T15:28:19.057Z",
+      "endsAt": "2024-06-27T16:22:19.057Z",
+      "generatorURL": "http://0b6051cdfbd0:9090/graph?g0.expr=alert001%7Bjob%3D%22custom%22%7D+%3E+0&g0.tab=1",
+      "status": {
+        "state": "active",
+        "silencedBy": null,
+        "inhibitedBy": null
+      },
+      "receivers": [
+        "bugle"
+      ],
+      "fingerprint": "ALERT1"
+    },
+    {
+      "labels": {
+        "alertname": "Alert Name 002",
+        "gm_instance": "PROM2",
+        "instance": "nginx:80",
+        "job": "custom",
+        "severity": "warning",
+        "team": "team1"
+      },
+      "annotations": {
+        "summary": "alert002 is > 0"
+      },
+      "startsAt": "2024-06-27T15:28:19.057Z",
+      "endsAt": "2024-06-27T16:22:19.057Z",
+      "generatorURL": "http://0b6051cdfbd0:9090/graph?g0.expr=alert002%7Bjob%3D%22custom%22%7D+%3E+0&g0.tab=1",
+      "status": {
+        "state": "active",
+        "silencedBy": null,
+        "inhibitedBy": null
+      },
+      "receivers": [
+        "bugle"
+      ],
+      "fingerprint": "ALERT2"
+    }
+  ]
+}

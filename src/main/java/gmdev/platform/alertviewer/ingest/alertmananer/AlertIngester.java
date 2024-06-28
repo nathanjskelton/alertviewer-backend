@@ -49,7 +49,7 @@ public class AlertIngester implements Ingester {
     Environment env;
 
     @Autowired
-    SSLContextFactory sslContextFactory;
+    AlertManagerClient alertManagerClient;
 
     @Autowired
     MetaDataHelper meta;
@@ -77,64 +77,18 @@ public class AlertIngester implements Ingester {
         System.out.println("************* This is a test *************");
     }
 
-    private JSONObject sendRequest(AlertManagerConfig amConfig, HttpRequest request) {
-        JSONObject json = null;
 
-        java.net.http.HttpClient http = null;
-        try {
-            http = java.net.http.HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).sslContext(sslContextFactory.getSSLContext()).build();
-        } catch(Exception e) {
-            log.error("Unable to get HTTP connection during ingest ("+amConfig.getName()+")", e);
-            state.getAlertManagersUp().remove(amConfig.getName());
-            return null;
-        }
-
-        java.net.http.HttpResponse<String> response = null;
-        int tries = 0;
-        boolean success = false;
-        while (tries < 5 && !success) {
-            tries++;
-            try {
-                response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-                success = true;
-            } catch (HttpConnectTimeoutException toe) {
-                log.warn("Connection timed out connecting to "+amConfig.getName()+" during attempt "+tries);
-            } catch (Exception e) {
-                log.error("Fatal error connecting to " + request.uri() + " during ingest (" + amConfig.getName() + ")", e);
-                state.getAlertManagersUp().remove(amConfig.getName());
-                return null;
-            }
-        }
-        if (!success) {
-            log.error("Exhausted all attempts to connect to "+amConfig.getName());
-            state.getAlertManagersUp().remove(amConfig.getName());
-            return  null;
-        }
-
-        if (response.statusCode() != 200) {
-            log.error("Response code != 200 connecting to " + request.uri() + " during ingest (" + amConfig.getName() + ")");
-            state.getAlertManagersUp().remove(amConfig.getName());
-            return null;
-        }
-
-        try {
-            json = new JSONObject(response.body());
-        } catch(Exception e) {
-            if (response != null) {
-                log.error("Unable to parse JSON during ingest ("+amConfig.getName()+"): " + response.body(), e);
-            } else {
-                log.error("Unable to parse JSON during ingest ("+amConfig.getName()+"): response is null", e);
-            }
-            state.getAlertManagersUp().remove(amConfig.getName());
-            return null;
-        }
-
-        return json;
-    }
 
     private boolean isFlappingExpired(AlertManagerEntry entry) {
         Instant i = Instant.ofEpochMilli(entry.getLastChange());
         return i.isBefore(Instant.now().minus(Duration.ofMinutes(Integer.parseInt(env.getProperty("flapping.timeout.minutes", "15")))));
+    }
+
+    public Alert jsonToAlert(String jsonAlert) throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        return objectMapper.readValue(jsonAlert, Alert.class);
     }
 
     public void ingest(AlertManagerConfig amConfig) {
@@ -146,7 +100,7 @@ public class AlertIngester implements Ingester {
                     .GET()
                     .build();
 
-            JSONObject json = sendRequest(amConfig, request);
+            JSONObject json = alertManagerClient.sendRequest(state, amConfig, request);
             if (json == null) {
                 return;
             }
@@ -157,10 +111,7 @@ public class AlertIngester implements Ingester {
             JSONArray data = json.getJSONArray("data");
             for (int i = 0;i < data.length();i++) {
                 String jsonAlert = data.getJSONObject(i).toString();
-                ObjectMapper objectMapper = new ObjectMapper();
-                objectMapper.registerModule(new JavaTimeModule());
-                objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-                Alert alertFromAlertmanager = objectMapper.readValue(jsonAlert, Alert.class);
+                Alert alertFromAlertmanager = jsonToAlert(jsonAlert);
                 Optional<AlertManagerEntry> alertFromDatabase = repo.findByIdAndAlertmanager(alertFromAlertmanager.getFingerprint(), amConfig.getName());
                 AlertManagerEntry databaseEntry;
                 if (alertFromDatabase.isPresent()) {
@@ -263,22 +214,12 @@ public class AlertIngester implements Ingester {
         }
     }
 
-
     public List<Silence> getSilences(AlertManagerConfig amConfig) {
         List<Silence> existingSilences = new ArrayList<>();
         try {
-            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(new URI(amConfig.getSilencesUrl()))
-                    .GET()
-                    .build();
-
-            JSONObject silencesJson = sendRequest(amConfig, request);
-            if (silencesJson == null) {
-                return existingSilences;
-            }
-
-            JSONArray silences = silencesJson.getJSONArray("data");
+            JSONObject json = alertManagerClient.getSilences(state, amConfig);
+            if (json == null) return existingSilences;
+            JSONArray silences = json.getJSONArray("data");
             for (int i = 0;i < silences.length();i++) {
                 String jsonSilence = silences.getJSONObject(i).toString();
                 ObjectMapper objectMapper = new ObjectMapper();
@@ -305,5 +246,6 @@ public class AlertIngester implements Ingester {
         return existingSilences;
 
     }
+
 
 }
