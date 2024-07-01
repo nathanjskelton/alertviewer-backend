@@ -1,0 +1,54 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "d7163532-8e51-4fc6-bc6e-1e23cf092437",
+      "matchers": [
+        {
+          "name": "alertname",
+          "value": "Alert Name 001",
+          "isRegex": false,
+          "isEqual": true
+        },
+        {
+          "name": "gm_instance",
+          "value": "PROM2",
+          "isRegex": false,
+          "isEqual": true
+        },
+        {
+          "name": "instance",
+          "value": "nginx:80",
+          "isRegex": false,
+          "isEqual": true
+        },
+        {
+          "name": "job",
+          "value": "custom",
+          "isRegex": false,
+          "isEqual": true
+        },
+        {
+          "name": "severity",
+          "value": "warning",
+          "isRegex": false,
+          "isEqual": true
+        },
+        {
+          "name": "team",
+          "value": "team1",
+          "isRegex": false,
+          "isEqual": true
+        }
+      ],
+      "startsAt": "2024-06-27T16:21:06.290131441Z",
+      "endsAt": "2024-06-27T18:20:58.246Z",
+      "updatedAt": "2024-06-27T16:21:06.290131441Z",
+      "createdBy": "test",
+      "comment": "test",
+      "status": {
+        "state": "active"
+      }
+    }
+  ]
+}

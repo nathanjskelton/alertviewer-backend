@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 import java.net.URI;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -38,6 +39,7 @@ public class AlertManagerClient {
         java.net.http.HttpClient http = null;
         try {
             http = java.net.http.HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).sslContext(sslContextFactory.getSSLContext()).build();
+
         } catch(Exception e) {
             log.error("Unable to get HTTP connection during ingest ("+amConfig.getName()+")", e);
             state.getAlertManagersUp().remove(amConfig.getName());
@@ -54,6 +56,8 @@ public class AlertManagerClient {
                 success = true;
             } catch (HttpConnectTimeoutException toe) {
                 log.warn("Connection timed out connecting to "+amConfig.getName()+" during attempt "+tries);
+            } catch (HttpTimeoutException te) {
+                log.warn("Request timed out while connected to "+amConfig.getName()+" during attempt "+tries);
             } catch (Exception e) {
                 log.error("Fatal error connecting to " + request.uri() + " during ingest (" + amConfig.getName() + ")", e);
                 state.getAlertManagersUp().remove(amConfig.getName());
@@ -89,7 +93,7 @@ public class AlertManagerClient {
 
     public JSONObject getSilences(StateBuffer state, AlertManagerConfig amConfig) throws Exception {
         java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest request = HttpRequest.newBuilder().timeout(Duration.ofSeconds(10))
                 .uri(new URI(amConfig.getSilencesUrl()))
                 .GET()
                 .build();

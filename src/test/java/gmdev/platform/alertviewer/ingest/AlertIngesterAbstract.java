@@ -8,7 +8,6 @@ import gmdev.platform.alertviewer.data.alert.Alert;
 import gmdev.platform.alertviewer.ingest.alertmananer.AlertIngester;
 import gmdev.platform.alertviewer.ingest.alertmananer.AlertManagerClient;
 import gmdev.platform.alertviewer.server.StateBuffer;
-import gmdev.platform.alertviewer.util.LogEntryStatus;
 import org.assertj.core.util.Lists;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -25,6 +24,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.http.HttpRequest;
 import java.nio.file.Files;
 import java.util.*;
@@ -59,96 +59,149 @@ public abstract class AlertIngesterAbstract {
     AlertIngester alertIngester;
 
     private final Map<String, AlertManagerEntry> databaseBefore = new HashMap<>();
-    private final Map<String, AlertManagerEntry> databaseToUse = new HashMap<>();
-    private final Map<String, AlertManagerEntry> databaseAfter = new HashMap<>();
+    private final Map<String, AlertManagerEntry> databaseActive = new HashMap<>();
 
-    public void doIngest() throws Exception {
-        log.info("*** Running ingester scenario "+getScenario()+" ***");
-        //env
-        //given(env.getProperty(eq("flapping.timeout.minutes"), any(String.class))).willReturn("2");
-        given(env.getProperty(eq("resolved.remove.minutes"), any(String.class))).willReturn("1");
-        given(env.getProperty(eq("flapping.timeout.minutes"), any(String.class))).willReturn("1");
+    final AlertManagerConfig amc1 = new AlertManagerConfig(1, "TestAlertManager1", "http://testurl1");
+    final AlertManagerConfig amc2 = new AlertManagerConfig(2, "TestAlertManager2", "http://testurl2");
 
-        //alertManagers
-        Map<String, AlertManagerConfig> alertmanagers = new HashMap<>();
-        AlertManagerConfig amc = new AlertManagerConfig(1, "TestAlertManager1", "http://testurl1");
-        alertmanagers.put("TestAlertManager1", amc);
-        given(stateBuffer.getAlertmanagers()).willReturn(alertmanagers.values());
+    public void bootstrapIngest() {
+        log.info("*** Running ingester scenario "+getScenario()+": "+getDescription()+" ***");
 
-        //client
-        String alertsJson = Files.readString(new File("src/test/resources/scenario"+getScenario()+"/alerts.json").toPath());
-        given(alertManagerClient.sendRequest(any(StateBuffer.class), any(AlertManagerConfig.class), any(HttpRequest.class)))
-                .willReturn(new JSONObject(alertsJson));
-        String silencesJson = Files.readString(new File("src/test/resources/scenario"+getScenario()+"/silences.json").toPath());
-        given(alertManagerClient.getSilences(any(StateBuffer.class), any()))
-                .willReturn(new JSONObject(silencesJson));
+        try {
+            //env
+            given(env.getProperty(eq("resolved.remove.minutes"), any(String.class))).willReturn("30");
+            given(env.getProperty(eq("flapping.timeout.minutes"), any(String.class))).willReturn("15");
 
-        //database
-        given(repo.save(any(AlertManagerEntry.class))).willAnswer(new Answer<Object>() {
-            @Override
-            public Object answer(InvocationOnMock invocationOnMock) throws Throwable {
-                AlertManagerEntry entry = invocationOnMock.getArgument(0);
-                return databaseAfter.put(entry.getId(), entry);
-            }
-        });
+            //alertManagers
+            Map<String, AlertManagerConfig> alertmanagers = new HashMap<>();
+            alertmanagers.put("TestAlertManager1", amc1);
+            given(stateBuffer.getAlertmanagers()).willReturn(alertmanagers.values());
 
-        String dbJson = Files.readString(new File("src/test/resources/scenario"+getScenario()+"/databaseAlerts.json").toPath());
-        JSONArray data = new JSONObject(dbJson).getJSONArray("data");
-        for (int i = 0;i < data.length();i++) {
-            String jsonAlert = data.getJSONObject(i).toString();
+            //client
+            given(alertManagerClient.sendRequest(any(StateBuffer.class), any(AlertManagerConfig.class), any(HttpRequest.class)))
+                    .willAnswer(new Answer<JSONObject>() {
+                        @Override
+                        public JSONObject answer(InvocationOnMock invocationOnMock) throws Throwable {
+                            try {
+                                return new JSONObject(getAlertsResponse());
+                            } catch(Throwable t) {
+                                fail("Unable to get alerts: "+t.getMessage());
+                                throw t;
+                            }
+                        }
+                    });
+            given(alertManagerClient.getSilences(any(StateBuffer.class), any()))
+                    .willAnswer(new Answer<JSONObject>() {
+                        @Override
+                        public JSONObject answer(InvocationOnMock invocationOnMock) throws Throwable {
+                            try {
+                                return new JSONObject(getSilencesResponse());
+                            } catch(Throwable t) {
+                                fail("Unable to get silences: "+t.getMessage());
+                                throw t;
+                            }
+                        }
+                    });
 
-            Alert alert = alertIngester.jsonToAlert(jsonAlert);
-            AlertManagerEntry ame = new AlertManagerEntry(alert);
-            ame.setAlertmanager(amc.getName());
-            ame = setupScenarioEntry(ame);
-            databaseToUse.put(ame.getId(), ame);
-
-            Alert alert2 = alertIngester.jsonToAlert(jsonAlert);
-            AlertManagerEntry ame2 = new AlertManagerEntry(alert2);
-            ame2.setAlertmanager(amc.getName());
-            ame2 = setupScenarioEntry(ame2);
-            databaseBefore.put(ame2.getId(), ame2);
-        }
-
-        given(repo.findAll()).willReturn(Lists.newArrayList(databaseToUse.values()));
-        given(repo.findByIdAndAlertmanager(any(String.class), any(String.class))).willAnswer(new Answer<Optional<AlertManagerEntry>>() {
-            @Override
-            public Optional<AlertManagerEntry> answer(InvocationOnMock invocationOnMock) throws Throwable {
-                Optional<AlertManagerEntry> oame = Optional.empty();
-                for (AlertManagerEntry entry : databaseToUse.values()) {
-                    if (entry.getId().equals(invocationOnMock.getArgument(0)) &&
-                            entry.getAlertmanager().equals(invocationOnMock.getArgument(1))) {
-                        oame = Optional.of(entry);
-                        log.info("Found a match in database for "+entry.getId());
-                        break;
+            //database save answer
+            given(repo.save(any(AlertManagerEntry.class))).willAnswer(new Answer<Object>() {
+                @Override
+                public Object answer(InvocationOnMock invocationOnMock) throws Throwable {
+                    AlertManagerEntry entry = invocationOnMock.getArgument(0);
+                    try {
+                        return databaseActive.put(entry.getId(), entry);
+                    } catch(Throwable t) {
+                        fail("Unable to save: "+t.getMessage());
+                        throw  t;
                     }
                 }
-                if (!oame.isPresent()) log.info("No match in database for "+invocationOnMock.getArgument(0));
-                return oame;
+            });
+
+            //load the initial database from the file
+            String dbJson = Files.readString(new File("src/test/resources/scenario" + getScenario() + "/databaseAlerts.json").toPath());
+            JSONArray data = new JSONObject(dbJson).getJSONArray("data");
+            for (int i = 0; i < data.length(); i++) {
+                String jsonAlert = data.getJSONObject(i).toString();
+
+                Alert alert = alertIngester.jsonToAlert(jsonAlert);
+                AlertManagerEntry ame = new AlertManagerEntry(alert);
+                ame.setAlertmanager(amc1.getName());
+                ame = setupScenarioEntry(ame);
+                databaseActive.put(ame.getId(), ame);
+
             }
-        });
+            snapshotDatabase();
 
-        //records deleted
-        DeleteResult dr = Mockito.mock(DeleteResult.class);
-        given(dr.getDeletedCount()).willReturn(0L);
-        given(mongo.remove(any(), eq(AlertManagerEntry.class))).willReturn(dr);
+            //setup finders
+            given(repo.findAll()).willAnswer(new Answer<List<AlertManagerEntry>>() {
+                @Override
+                public List<AlertManagerEntry> answer(InvocationOnMock invocationOnMock) throws Throwable {
+                    return Lists.newArrayList(databaseActive.values());
+                }
+            });
+            given(repo.findByIdAndAlertmanager(any(String.class), any(String.class))).willAnswer(new Answer<Optional<AlertManagerEntry>>() {
+                @Override
+                public Optional<AlertManagerEntry> answer(InvocationOnMock invocationOnMock) throws Throwable {
+                    Optional<AlertManagerEntry> oame = Optional.empty();
+                    for (AlertManagerEntry entry : databaseActive.values()) {
+                        if (entry.getId().equals(invocationOnMock.getArgument(0)) &&
+                                entry.getAlertmanager().equals(invocationOnMock.getArgument(1))) {
+                            oame = Optional.of(entry);
+                            log.info("Found a match in database for " + entry.getId());
+                            break;
+                        }
+                    }
+                    if (!oame.isPresent()) log.info("No match in database for " + invocationOnMock.getArgument(0));
+                    return oame;
+                }
+            });
 
-        //run test
-        runScenario();
+            //records deleted
+            DeleteResult dr = Mockito.mock(DeleteResult.class);
+            given(dr.getDeletedCount()).willReturn(0L);
+            given(mongo.remove(any(), eq(AlertManagerEntry.class))).willReturn(dr);
 
+            //run test
+            runScenario();
+
+        } catch(Throwable e) {
+            fail("Exception Thrown: "+e.getMessage());
+        }
     }
 
-    protected Map<String, AlertManagerEntry> getBefore() {
+    protected Map<String, AlertManagerEntry> getDatabaseBefore() {
         return databaseBefore;
     }
 
-    protected Map<String, AlertManagerEntry> getAfter() {
-        return databaseAfter;
+    protected Map<String, AlertManagerEntry> getDatabaseActive() {
+        return databaseActive;
+    }
+
+    protected void snapshotDatabase() {
+        log.info("Update before snapshot database");
+        databaseBefore.clear();
+        for(AlertManagerEntry entry: databaseActive.values()) {
+            AlertManagerEntry newEntry = new AlertManagerEntry(entry.getAlert());
+            newEntry.setAlertmanager(amc1.getName());
+            newEntry.setFlapping(entry.isFlapping());
+            newEntry.setAcked(entry.isAcked());
+            newEntry.setStatus(entry.getStatus());
+            newEntry.setLastChange(entry.getLastChange());
+            databaseBefore.put(newEntry.getId(), newEntry);
+        }
+
     }
 
     protected abstract AlertManagerEntry setupScenarioEntry(AlertManagerEntry ame);
 
     protected abstract int getScenario();
 
+    protected abstract String getDescription();
+
     protected abstract void runScenario();
+
+    protected abstract String getAlertsResponse() throws IOException;
+
+    protected abstract  String getSilencesResponse() throws IOException;
+
 }
