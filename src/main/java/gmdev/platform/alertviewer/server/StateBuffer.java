@@ -17,12 +17,16 @@ import org.springframework.stereotype.Component;
 import javax.annotation.PostConstruct;
 import javax.xml.bind.DatatypeConverter;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 @Component
 public class StateBuffer {
     private static final Logger log = LoggerFactory.getLogger(StateBuffer.class);
+
+
+    private Instant lastIngestSuccess = Instant.MIN;
 
     private final Object MUTEX = new Object();
     private final Map<String, CompletableFuture<String>> asyncs = new HashMap<>();
@@ -70,6 +74,13 @@ public class StateBuffer {
 
     }
 
+    public void setLastIngestSuccess() {
+        lastIngestSuccess = Instant.now();
+    }
+
+    public Instant getLastIngestSuccess() {
+        return lastIngestSuccess;
+    }
 
     public Collection<AlertManagerConfig> getAlertmanagers() {
         return alertmanagers.values();
@@ -93,23 +104,6 @@ public class StateBuffer {
 
 
 
-
-    public boolean isStale(String sessionId) {
-        synchronized (MUTEX) {
-            Boolean st = stale.get(sessionId);
-            if (st == null) st = Boolean.FALSE;
-            stale.put(sessionId, Boolean.FALSE);
-            return st;
-        }
-    }
-
-    public void setStale() {
-        synchronized (MUTEX) {
-            for (String session:sessions.keySet()) {
-                stale.put(session, Boolean.TRUE);
-            }
-        }
-    }
 
     public Set<String> getAlertManagersAll() {
         return alertManagersAll;
@@ -150,7 +144,7 @@ public class StateBuffer {
 
     private String getStatusMessage() {
         String msg;
-        msg = "Ready.";
+        msg = "Ready version "+env.getProperty("build.version")+".";
         return msg;
     }
 
@@ -179,7 +173,8 @@ public class StateBuffer {
 
     public PollResult poll(String sessionId) throws ServiceException {
         log.trace("Session " + sessionId + " polling...");
-        return new PollResult(sessionId, getMessageStack(sessionId), getStatusMessage(), isStale(sessionId), alertManagersAll, alertManagersUp);
+        return new PollResult(sessionId, getMessageStack(sessionId), getStatusMessage(),
+                lastIngestSuccess, env.getProperty("build.version"), alertManagersAll, alertManagersUp);
     }
 
     public Registration registerSession(String dn, String ingressUsername) throws AuthenticationException {

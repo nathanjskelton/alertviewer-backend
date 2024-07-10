@@ -66,11 +66,13 @@ public class AlertIngester implements Ingester {
     @Override
     public void ingest() {
         List<Silence> silences = new ArrayList<>();
+        boolean oneSuccess = false;
         for (AlertManagerConfig c:state.getAlertmanagers()) {
-            ingest(c);
+            boolean b = ingest(c);
+            if (b) oneSuccess = true;
             silences.addAll(getSilences(c));
         }
-        state.setSilences(silences);
+        if (oneSuccess) state.setLastIngestSuccess();
     }
 
 
@@ -91,7 +93,7 @@ public class AlertIngester implements Ingester {
         return objectMapper.readValue(jsonAlert, Alert.class);
     }
 
-    public void ingest(AlertManagerConfig amConfig) {
+    public boolean ingest(AlertManagerConfig amConfig) {
         log.info("AlertManager Ingester running for alertmanager "+amConfig.getName());
         state.getAlertManagersAll().add(amConfig.getName());
         try {
@@ -102,7 +104,7 @@ public class AlertIngester implements Ingester {
 
             JSONObject json = alertManagerClient.sendRequest(state, amConfig, request);
             if (json == null) {
-                return;
+                return false;
             }
 
             List<AlertManagerEntry> allActiveMinusDatabased = repo.findAll();
@@ -217,9 +219,11 @@ public class AlertIngester implements Ingester {
             }
             state.getAlertManagersUp().add(amConfig.getName());
 
+            return true;
         } catch(Exception e) {
             log.error("Error reading alerts from "+amConfig.getName(), e);
             state.getAlertManagersUp().remove(amConfig.getName());
+            return false;
         }
     }
 
