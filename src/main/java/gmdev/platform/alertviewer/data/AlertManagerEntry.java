@@ -72,6 +72,9 @@ public class AlertManagerEntry {
         if (!alert.getFingerprint().equals(this.id)) {throw new RuntimeException("Fingerprint mismatch:\n"+
                 this.id+">>>\n"+this.alert.toString()+"\n\n"+alert.getFingerprint()+">>>\n"+alert.toString());}
         this.alert = alert;
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
+        friendlyStartTime = alert.getStartsAt().format(dtf);
+        friendlyEndTime = alert.getEndsAt().format(dtf);
     }
 
     public long getLastChange() {

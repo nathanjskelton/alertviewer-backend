@@ -121,6 +121,7 @@ public class AlertIngester implements Ingester {
                 if (alertFromDatabase.isPresent()) {
                     databaseEntry = alertFromDatabase.get();
                     databaseEntry.setAlert(alertFromAlertmanager);
+                    log.debug("Existing alert will be updated to: " + alertFromAlertmanager);
 
                     //RESOLVED alert firing again...
                     if (LogEntryStatus.RESOLVED.equals(databaseEntry.getStatus())) {
@@ -180,6 +181,7 @@ public class AlertIngester implements Ingester {
 
                     allActiveMinusDatabased.remove(databaseEntry);
                 } else {
+                    log.debug("Creating new alert record: " + alertFromAlertmanager);
                     databaseEntry = new AlertManagerEntry(alertFromAlertmanager);
                     databaseEntry.addNote("System", "New alert imported from "+amConfig.getName());
                 }
