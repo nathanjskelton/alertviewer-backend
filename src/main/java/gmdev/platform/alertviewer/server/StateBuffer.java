@@ -4,6 +4,10 @@ import gmdev.platform.alertviewer.data.AlertManagerConfig;
 import gmdev.platform.alertviewer.data.AlertManagerUser;
 import gmdev.platform.alertviewer.data.AlertManagerUserRepo;
 import gmdev.platform.alertviewer.data.silence.Silence;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,13 +24,15 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 @Component
 public class StateBuffer {
     private static final Logger log = LoggerFactory.getLogger(StateBuffer.class);
 
 
-    private Instant lastIngestSuccess = Instant.MIN;
+    private Instant lastIngestSuccess = Instant.now();
 
     private final Object MUTEX = new Object();
     private final Map<String, CompletableFuture<String>> asyncs = new HashMap<>();
@@ -41,6 +47,8 @@ public class StateBuffer {
 
     private final Set<Silence> silences = new HashSet<>();
 
+    private AtomicLong ingestDelta = new AtomicLong(0);
+
     @Autowired
     Environment env;
 
@@ -49,10 +57,14 @@ public class StateBuffer {
     @Autowired
     AlertManagerUserRepo userRepo;
 
+
     @PostConstruct
     private void init() {
 
         try {
+            Gauge.builder("ingest.delta", () ->
+                    ingestDelta).strongReference(true).register(Metrics.globalRegistry);
+
             int count = Integer.parseInt(env.getProperty("alertmanager.count"));
             for (int i = 1; i <= count; i++) {
                 String amId = ""+i;
@@ -72,6 +84,13 @@ public class StateBuffer {
         }
         log.info("*** StateBuffer Initialized ***");
 
+    }
+
+    public void setLastIngestAttempt() {
+        final long value = System.currentTimeMillis() - lastIngestSuccess.toEpochMilli();
+        log.debug("INGEST DELTA "+value);
+        //Metrics.globalRegistry.gauge("ingest.delta", value);
+        ingestDelta.set(value);
     }
 
     public void setLastIngestSuccess() {

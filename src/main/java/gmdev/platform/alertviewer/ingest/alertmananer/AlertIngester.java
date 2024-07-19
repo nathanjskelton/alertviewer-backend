@@ -72,6 +72,7 @@ public class AlertIngester implements Ingester {
             if (b) oneSuccess = true;
             silences.addAll(getSilences(c));
         }
+        state.setLastIngestAttempt();
         if (oneSuccess) state.setLastIngestSuccess();
     }
 
