@@ -22,7 +22,9 @@ public class IngestScheduler {
     @Autowired
     Ingester ingester;
 
-    @Scheduled(initialDelay = 5000, fixedRateString = "${ingest.fixedrate}")
+    public static final long rate = 30000L;
+
+    @Scheduled(initialDelay = 5000, fixedRateString = rate+"")
     private void ingest() {
         log.debug("Running scheduled ingest");
         log.trace("*** LAST END TIME: "+ meta.getLastEnd());

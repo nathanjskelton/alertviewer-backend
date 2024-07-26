@@ -49,6 +49,10 @@ public class StateBuffer {
 
     private AtomicLong ingestDelta = new AtomicLong(0);
 
+    private AtomicLong alertmanagersOnline = new AtomicLong(0);
+
+    private AtomicLong alertmanagersMax = new AtomicLong(0);
+
     @Autowired
     Environment env;
 
@@ -62,8 +66,14 @@ public class StateBuffer {
     private void init() {
 
         try {
-            Gauge.builder("ingest.delta", () ->
+            Gauge.builder("cortana.ingest.delta", () ->
                     ingestDelta).strongReference(true).register(Metrics.globalRegistry);
+
+            Gauge.builder("cortana.alertmanagers.max", () ->
+                    alertmanagersMax).strongReference(true).register(Metrics.globalRegistry);
+
+            Gauge.builder("cortana.alertmanagers.online", () ->
+                    alertmanagersOnline).strongReference(true).register(Metrics.globalRegistry);
 
             int count = Integer.parseInt(env.getProperty("alertmanager.count"));
             for (int i = 1; i <= count; i++) {
@@ -91,6 +101,11 @@ public class StateBuffer {
         log.debug("INGEST DELTA "+value);
         //Metrics.globalRegistry.gauge("ingest.delta", value);
         ingestDelta.set(value);
+    }
+
+    public void setAlertManagerStatus(int max, int online) {
+        alertmanagersOnline.set(online);
+        alertmanagersMax.set(max);
     }
 
     public void setLastIngestSuccess() {
@@ -162,8 +177,17 @@ public class StateBuffer {
 
 
     private String getStatusMessage() {
+        boolean stale = ingestDelta.get() > 60000;
         String msg;
-        msg = "Ready version "+env.getProperty("build.version")+".";
+        if (alertmanagersMax.get() == 0) {
+            msg = "ERROR: No alertmanagers registered.";
+            log.error(msg);
+        } else if (stale) {
+            msg = "ERROR: No response from alertmanagers within scheduled time.";
+            log.error(msg);
+        } else {
+            msg = "Ready version " + env.getProperty("build.version") + ".";
+        }
         return msg;
     }
 

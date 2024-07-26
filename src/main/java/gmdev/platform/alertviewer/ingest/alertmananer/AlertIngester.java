@@ -66,14 +66,19 @@ public class AlertIngester implements Ingester {
     @Override
     public void ingest() {
         List<Silence> silences = new ArrayList<>();
-        boolean oneSuccess = false;
+        int max = 0;
+        int online = 0;
         for (AlertManagerConfig c:state.getAlertmanagers()) {
+            max++;
             boolean b = ingest(c);
-            if (b) oneSuccess = true;
+            if (b) {
+                online++;
+            }
             silences.addAll(getSilences(c));
         }
         state.setLastIngestAttempt();
-        if (oneSuccess) state.setLastIngestSuccess();
+        if (online > 0) state.setLastIngestSuccess();
+        state.setAlertManagerStatus(max, online);
     }
 
 
