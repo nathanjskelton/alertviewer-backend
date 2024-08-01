@@ -76,6 +76,8 @@ public class AlertIngester implements Ingester {
             }
             silences.addAll(getSilences(c));
         }
+        log.debug("FINISHED INGEST, there are "+silences.size()+" silences");
+        state.setSilences(silences);
         state.setLastIngestAttempt();
         if (online > 0) state.setLastIngestSuccess();
         state.setAlertManagerStatus(max, online);
@@ -236,13 +238,17 @@ public class AlertIngester implements Ingester {
     }
 
     public List<Silence> getSilences(AlertManagerConfig amConfig) {
+        log.debug("Reading silences for "+amConfig.getName());
         List<Silence> existingSilences = new ArrayList<>();
         try {
             JSONObject json = alertManagerClient.getSilences(state, amConfig);
+
             if (json == null) return existingSilences;
+            log.debug("Silences JSON: "+json.toString());
             JSONArray silences = json.getJSONArray("data");
             for (int i = 0;i < silences.length();i++) {
                 String jsonSilence = silences.getJSONObject(i).toString();
+                log.debug("processing silence "+i+": "+jsonSilence);
                 ObjectMapper objectMapper = new ObjectMapper();
                 objectMapper.registerModule(new JavaTimeModule());
                 objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -251,6 +257,7 @@ public class AlertIngester implements Ingester {
                 objectMapper.registerModule(module);
                 Silence silence = objectMapper.readValue(jsonSilence, Silence.class);
                 silence.setAlertmanager(amConfig.getName());
+                log.debug("silence state is '"+silence.getStatus().getState()+"'");
                 if (silence.getStatus().getState().equals("active")) {
                     //set hours based on dates
                     Duration dur = Duration.between(silence.getStartsat(), silence.getEndsat());
@@ -260,7 +267,7 @@ public class AlertIngester implements Ingester {
                     existingSilences.add(silence);
                 }
             }
-            //log.debug("SILENCES ADDED: "+existingSilences.size());
+            log.debug("SILENCES ADDED: "+existingSilences.size());
         } catch(Exception e) {
             log.error("Error reading silences from "+amConfig.getName(), e);
         }
