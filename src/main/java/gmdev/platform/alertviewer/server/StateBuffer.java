@@ -85,7 +85,12 @@ public class StateBuffer {
 
                 String url = env.getProperty("alertmanager.url."+amId);
                 String name = env.getProperty("alertmanager.name."+amId);
-                AlertManagerConfig amc = new AlertManagerConfig(i, name, url);
+                String api = env.getProperty("alertmanager.api."+amId, "v1");
+                if (api.isEmpty()) { api = "v1"; } //needed because there may be an empty one configured in the chart
+                if (!"v1".equals(api) && !"v2".equals(api)) {
+                    log.error("INVALID API CONFIGURED FOR "+name+": "+api);
+                }
+                AlertManagerConfig amc = new AlertManagerConfig(i, name, url, api);
                 alertmanagers.put(name, amc);
 
             }

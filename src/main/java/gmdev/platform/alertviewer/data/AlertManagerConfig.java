@@ -8,10 +8,13 @@ public class AlertManagerConfig {
 
     private String url;
 
-    public AlertManagerConfig(int instance, String name, String url) {
+    private String apiVersion;
+
+    public AlertManagerConfig(int instance, String name, String url, String apiVersion) {
         this.instance = instance;
         this.name = name;
         this.url = url;
+        this.apiVersion = apiVersion;
     }
 
     public int getInstance() {
@@ -22,16 +25,27 @@ public class AlertManagerConfig {
         return name;
     }
 
+    public String getApiVersion() { return apiVersion; }
+
     public String getAlertsUrl() {
-        return url + "/api/v1/alerts";
+        return url + "/api/" + apiVersion + "/alerts";
     }
 
     public String getSilencesUrl() {
-        return url + "/api/v1/silences";
+        return url + "/api/" + apiVersion + "/silences";
     }
 
     public String getSilenceUrl() {
-        return url + "/api/v1/silence";
+        return url + "/api/" + apiVersion + "/silence";
     }
 
+    @Override
+    public String toString() {
+        return "AlertManagerConfig{" +
+                "instance=" + instance +
+                ", name='" + name + '\'' +
+                ", url='" + url + '\'' +
+                ", apiVersion='" + apiVersion + '\'' +
+                '}';
+    }
 }

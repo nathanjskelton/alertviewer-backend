@@ -98,6 +98,7 @@ public class AlertIngester implements Ingester {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        log.debug("Alert JSON: "+jsonAlert);
         return objectMapper.readValue(jsonAlert, Alert.class);
     }
 
@@ -110,8 +111,8 @@ public class AlertIngester implements Ingester {
                     .GET()
                     .build();
 
-            JSONObject json = alertManagerClient.sendRequest(state, amConfig, request);
-            if (json == null) {
+            JSONArray data = alertManagerClient.sendRequest(state, amConfig, request);
+            if (data == null) {
                 return false;
             }
 
@@ -119,7 +120,6 @@ public class AlertIngester implements Ingester {
             log.debug("Found "+allActiveMinusDatabased.size()+" alerts in database at start of ingest");
 
             //process the incoming active alerts
-            JSONArray data = json.getJSONArray("data");
             for (int i = 0;i < data.length();i++) {
                 String jsonAlert = data.getJSONObject(i).toString();
                 Alert alertFromAlertmanager = jsonToAlert(jsonAlert);
@@ -241,11 +241,10 @@ public class AlertIngester implements Ingester {
         log.debug("Reading silences for "+amConfig.getName());
         List<Silence> existingSilences = new ArrayList<>();
         try {
-            JSONObject json = alertManagerClient.getSilences(state, amConfig);
+            JSONArray silences = alertManagerClient.getSilences(state, amConfig);
 
-            if (json == null) return existingSilences;
-            log.debug("Silences JSON: "+json.toString());
-            JSONArray silences = json.getJSONArray("data");
+            if (silences == null) return existingSilences;
+            log.debug("Silences JSON: "+silences.toString());
             for (int i = 0;i < silences.length();i++) {
                 String jsonSilence = silences.getJSONObject(i).toString();
                 log.debug("processing silence "+i+": "+jsonSilence);

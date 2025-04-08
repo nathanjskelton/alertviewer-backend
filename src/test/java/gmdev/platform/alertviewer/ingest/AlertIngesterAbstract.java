@@ -7,6 +7,7 @@ import gmdev.platform.alertviewer.data.AlertManagerEntryRepo;
 import gmdev.platform.alertviewer.data.alert.Alert;
 import gmdev.platform.alertviewer.ingest.alertmananer.AlertIngester;
 import gmdev.platform.alertviewer.ingest.alertmananer.AlertManagerClient;
+import gmdev.platform.alertviewer.ingest.alertmananer.AlertManagerUtil;
 import gmdev.platform.alertviewer.server.StateBuffer;
 import org.assertj.core.util.Lists;
 import org.json.JSONArray;
@@ -27,9 +28,11 @@ import java.io.File;
 import java.io.IOException;
 import java.net.http.HttpRequest;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -39,6 +42,9 @@ import static org.mockito.BDDMockito.given;
 @ExtendWith(MockitoExtension.class)
 public abstract class AlertIngesterAbstract {
     private static final Logger log = LoggerFactory.getLogger(AlertIngesterAbstract.class);
+
+    @InjectMocks
+    AlertManagerUtil amUtil;
 
     @Mock
     Environment env;
@@ -61,10 +67,11 @@ public abstract class AlertIngesterAbstract {
     private final Map<String, AlertManagerEntry> databaseBefore = new HashMap<>();
     private final Map<String, AlertManagerEntry> databaseActive = new HashMap<>();
 
-    final AlertManagerConfig amc1 = new AlertManagerConfig(1, "TestAlertManager1", "http://testurl1");
-    final AlertManagerConfig amc2 = new AlertManagerConfig(2, "TestAlertManager2", "http://testurl2");
+    protected abstract void mockAlertManager();
 
     public void bootstrapIngest() {
+        mockAlertManager();
+
         log.info("*** Running ingester scenario "+getScenario()+": "+getDescription()+" ***");
 
         try {
@@ -72,18 +79,23 @@ public abstract class AlertIngesterAbstract {
             given(env.getProperty(eq("resolved.remove.minutes"), any(String.class))).willReturn("30");
             given(env.getProperty(eq("flapping.timeout.minutes"), any(String.class))).willReturn("15");
 
-            //alertManagers
-            Map<String, AlertManagerConfig> alertmanagers = new HashMap<>();
-            alertmanagers.put("TestAlertManager1", amc1);
-            given(stateBuffer.getAlertmanagers()).willReturn(alertmanagers.values());
-
             //client
             given(alertManagerClient.sendRequest(any(StateBuffer.class), any(AlertManagerConfig.class), any(HttpRequest.class)))
-                    .willAnswer(new Answer<JSONObject>() {
+                    .willAnswer(new Answer<JSONArray>() {
                         @Override
-                        public JSONObject answer(InvocationOnMock invocationOnMock) throws Throwable {
+                        public JSONArray answer(InvocationOnMock invocationOnMock) throws Throwable {
                             try {
-                                return new JSONObject(getAlertsResponse());
+                                AlertManagerConfig amConfig = invocationOnMock.getArgument(1, AlertManagerConfig.class);
+                                JSONArray json;
+                                if ("v2".equals(amConfig.getApiVersion())) {
+                                    json = new JSONArray(getAlertsResponse());
+                                    log.info("API v2 configured");
+                                } else {
+                                    JSONObject jsonObject = new JSONObject(getAlertsResponse());
+                                    json = jsonObject.getJSONArray("data");
+                                    log.info("API v1 configured");
+                                }
+                                return json;
                             } catch(Throwable t) {
                                 fail("Unable to get alerts: "+t.getMessage());
                                 throw t;
@@ -91,11 +103,12 @@ public abstract class AlertIngesterAbstract {
                         }
                     });
             given(alertManagerClient.getSilences(any(StateBuffer.class), any()))
-                    .willAnswer(new Answer<JSONObject>() {
+                    .willAnswer(new Answer<JSONArray>() {
                         @Override
-                        public JSONObject answer(InvocationOnMock invocationOnMock) throws Throwable {
+                        public JSONArray answer(InvocationOnMock invocationOnMock) throws Throwable {
                             try {
-                                return new JSONObject(getSilencesResponse());
+                                AlertManagerConfig amConfig = invocationOnMock.getArgument(1, AlertManagerConfig.class);
+                                return amUtil.getJsonArray(amConfig, getSilencesResponse());
                             } catch(Throwable t) {
                                 fail("Unable to get silences: "+t.getMessage());
                                 throw t;
@@ -125,7 +138,7 @@ public abstract class AlertIngesterAbstract {
 
                 Alert alert = alertIngester.jsonToAlert(jsonAlert);
                 AlertManagerEntry ame = new AlertManagerEntry(alert);
-                ame.setAlertmanager(amc1.getName());
+                ame.setAlertmanager("TestAlertManager");
                 ame = setupScenarioEntry(ame);
                 databaseActive.put(ame.getId(), ame);
 
@@ -182,7 +195,7 @@ public abstract class AlertIngesterAbstract {
         databaseBefore.clear();
         for(AlertManagerEntry entry: databaseActive.values()) {
             AlertManagerEntry newEntry = new AlertManagerEntry(entry.getAlert());
-            newEntry.setAlertmanager(amc1.getName());
+            newEntry.setAlertmanager("TestAlertManager");
             newEntry.setFlapping(entry.isFlapping());
             newEntry.setAcked(entry.isAcked());
             newEntry.setStatus(entry.getStatus());

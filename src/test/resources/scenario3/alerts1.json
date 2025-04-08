@@ -1,0 +1,31 @@
+[
+  {
+    "annotations": {
+      "summary": "Alert 001"
+    },
+    "endsAt": "2025-04-02T17:11:19.057Z",
+    "fingerprint": "ALERT1",
+    "receivers": [
+      {
+        "name": "bugle"
+      }
+    ],
+    "startsAt": "2025-04-02T10:03:19.057Z",
+    "status": {
+      "inhibitedBy": [],
+      "silencedBy": [],
+      "mutedBy": [],
+      "state": "active"
+    },
+    "updatedAt": "2025-04-02T17:07:19.061Z",
+    "generatorURL": "http://prometheus-d489bdfdf-6ssnl:9090/graph?g0.expr=absent%28alert004%7Bjob%3D%22custom%22%7D%29&g0.tab=1",
+    "labels": {
+      "alertname": "Alert Name 001",
+      "env": "",
+      "gm_instance": "PROM1",
+      "job": "custom",
+      "severity": "warning",
+      "team": "team2"
+    }
+  }
+]

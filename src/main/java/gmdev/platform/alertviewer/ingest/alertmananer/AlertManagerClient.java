@@ -1,13 +1,6 @@
 package gmdev.platform.alertviewer.ingest.alertmananer;
 
-import com.fasterxml.jackson.core.Version;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.module.SimpleModule;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import gmdev.platform.alertviewer.data.AlertManagerConfig;
-import gmdev.platform.alertviewer.data.silence.Silence;
-import gmdev.platform.alertviewer.server.CustomDateDeserializer;
 import gmdev.platform.alertviewer.server.StateBuffer;
 import gmdev.platform.alertviewer.util.SSLContextFactory;
 import org.json.JSONArray;
@@ -22,9 +15,6 @@ import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 
 @Component
 public class AlertManagerClient {
@@ -33,8 +23,8 @@ public class AlertManagerClient {
     @Autowired
     SSLContextFactory sslContextFactory;
 
-    public JSONObject sendRequest(StateBuffer state, AlertManagerConfig amConfig, HttpRequest request) {
-        JSONObject json = null;
+    public JSONArray sendRequest(StateBuffer state, AlertManagerConfig amConfig, HttpRequest request) {
+        JSONArray json = null;
 
         java.net.http.HttpClient http = null;
         try {
@@ -72,12 +62,21 @@ public class AlertManagerClient {
 
         if (response.statusCode() != 200) {
             log.error("Response code != 200 connecting to " + request.uri() + " during ingest (" + amConfig.getName() + ")");
+            log.error("Response: "+response.body());
             state.getAlertManagersUp().remove(amConfig.getName());
             return null;
         }
 
         try {
-            json = new JSONObject(response.body());
+            log.debug("RESPONSE: "+response.body());
+            if ("v2".equals(amConfig.getApiVersion())) {
+                json = new JSONArray(response.body());
+                log.info("API v2 configured");
+            } else {
+                JSONObject jsonObject = new JSONObject(response.body());
+                json = jsonObject.getJSONArray("data");
+                log.info("API v1 configured");
+            }
         } catch(Exception e) {
             if (response != null) {
                 log.error("Unable to parse JSON during ingest ("+amConfig.getName()+"): " + response.body(), e);
@@ -91,7 +90,7 @@ public class AlertManagerClient {
         return json;
     }
 
-    public JSONObject getSilences(StateBuffer state, AlertManagerConfig amConfig) throws Exception {
+    public JSONArray getSilences(StateBuffer state, AlertManagerConfig amConfig) throws Exception {
         java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
         HttpRequest request = HttpRequest.newBuilder().timeout(Duration.ofSeconds(10))
                 .uri(new URI(amConfig.getSilencesUrl()))

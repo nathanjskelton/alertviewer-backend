@@ -1,5 +1,6 @@
 package gmdev.platform.alertviewer.ingest;
 
+import gmdev.platform.alertviewer.data.AlertManagerConfig;
 import gmdev.platform.alertviewer.data.AlertManagerEntry;
 import gmdev.platform.alertviewer.util.LogEntryStatus;
 import org.junit.jupiter.api.Test;
@@ -9,16 +10,19 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.test.util.AssertionErrors.fail;
 
-public class AlertIngesterScenario2Test extends AlertIngesterAbstract {
+public class  AlertIngesterScenario2Test extends AlertIngesterAbstract {
     private static final Logger log = LoggerFactory.getLogger(AlertIngesterScenario2Test.class);
 
     private int step = 1;
+
 
     @Test
     public void alertIngesterScenario2Test() throws Exception {
@@ -33,6 +37,14 @@ public class AlertIngesterScenario2Test extends AlertIngesterAbstract {
     @Override
     protected String getDescription() {
         return "Flapping Test";
+    }
+
+    @Override
+    protected void mockAlertManager() {
+        final AlertManagerConfig amc1 = new AlertManagerConfig(1, "TestAlertManager", "http://testurl", "v1");
+        Map<String, AlertManagerConfig> alertmanagers = new HashMap<>();
+        alertmanagers.put("TestAlertManager", amc1);
+        given(stateBuffer.getAlertmanagers()).willReturn(alertmanagers.values());
     }
 
     @Override
@@ -75,7 +87,6 @@ public class AlertIngesterScenario2Test extends AlertIngesterAbstract {
     protected String getAlertsResponse() throws IOException {
         log.info("Read Alerts file "+step);
         return Files.readString(new File("src/test/resources/scenario"+getScenario()+"/alerts"+step+".json").toPath());
-
     }
 
     @Override

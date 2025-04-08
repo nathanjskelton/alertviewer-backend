@@ -25,15 +25,27 @@ public class Alert {
     @JsonDeserialize(using = LocalDateTimeDeserializer.class)
     LocalDateTime endsAt;
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
+    LocalDateTime updatedAt = LocalDateTime.now();
+
     String generatorURL;
 
     AlertStatus status;
 
-    Set<String> receivers;
+    Set<Object> receivers;
 
     String fingerprint;
 
     public Alert() {
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 
     public Map<String, String> getLabels() {
@@ -84,11 +96,11 @@ public class Alert {
         this.status = status;
     }
 
-    public Set<String> getReceivers() {
+    public Set<Object> getReceivers() {
         return receivers;
     }
 
-    public void setReceivers(Set<String> receivers) {
+    public void setReceivers(Set<Object> receivers) {
         this.receivers = receivers;
     }
 

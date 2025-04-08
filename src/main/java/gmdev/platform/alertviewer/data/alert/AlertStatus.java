@@ -10,6 +10,8 @@ public class AlertStatus {
     private List<String> inhibitedby;
     @JsonProperty("silencedBy")
     private List<String> silencedby;
+    @JsonProperty("mutedBy")
+    private List<String> mutedBy;
     private String state;
     public void setInhibitedby(List<String> inhibitedby) {
         this.inhibitedby = inhibitedby;
@@ -32,4 +34,11 @@ public class AlertStatus {
         return state;
     }
 
+    public List<String> getMutedBy() {
+        return mutedBy;
+    }
+
+    public void setMutedBy(List<String> mutedBy) {
+        this.mutedBy = mutedBy;
+    }
 }
