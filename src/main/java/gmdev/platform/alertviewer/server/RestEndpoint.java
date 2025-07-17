@@ -75,11 +75,12 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("No Credentials provided"), HttpStatus.UNAUTHORIZED);
             }
             HttpHeaders responseHeaders = new HttpHeaders();
-            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-token", "CORTANA-user", "CORTANA-role"));
+            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-banner", "CORTANA-token", "CORTANA-user", "CORTANA-role"));
             Registration reg = state.registerSession(dn, ingressUser);
             responseHeaders.set("CORTANA-TOKEN", reg.getToken());
             responseHeaders.set("CORTANA-USER", reg.getUser());
             responseHeaders.set("CORTANA-ROLE", reg.getRole());
+            responseHeaders.set("CORTANA-BANNER", env.getProperty("banner.text"));
             return new ResponseEntity("login successful", responseHeaders, HttpStatus.OK);
         } catch (Exception e) {
             log.error("Login error: "+e.getMessage(), e);

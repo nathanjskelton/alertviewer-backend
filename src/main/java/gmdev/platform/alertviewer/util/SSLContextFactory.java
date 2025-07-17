@@ -29,7 +29,6 @@ public class SSLContextFactory {
         return sslContext;
     }
 
-
     private static final TrustManager MOCK_TRUST_MANAGER = new X509ExtendedTrustManager() {
         @Override
         public void checkClientTrusted(X509Certificate[] x509Certificates, String s, Socket socket) throws CertificateException {
