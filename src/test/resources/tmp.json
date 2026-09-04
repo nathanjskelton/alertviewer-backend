@@ -20,7 +20,7 @@
   "labels": {
     "severity": "warning",
     "alertname": "Alert Name 001",
-    "gm_instance": "PROM1",
+    "environment": "PROM1",
     "team": "team2",
     "env": "",
     "job": "custom"
@@ -42,7 +42,7 @@
     "severity": "warning",
     "instance": "nginx:80",
     "alertname": "Alert Name 001",
-    "gm_instance": "PROM2",
+    "environment": "PROM2",
     "team": "team1",
     "job": "custom"
   },

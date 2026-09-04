@@ -11,7 +11,7 @@
           "isEqual": true
         },
         {
-          "name": "gm_instance",
+          "name": "environment",
           "value": "PROM2",
           "isRegex": false,
           "isEqual": true

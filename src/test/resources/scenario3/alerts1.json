@@ -22,7 +22,7 @@
     "labels": {
       "alertname": "Alert Name 001",
       "env": "",
-      "gm_instance": "PROM1",
+      "environment": "PROM1",
       "job": "custom",
       "severity": "warning",
       "team": "team2"
