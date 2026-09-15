@@ -1,5 +1,6 @@
 package net.njsdomain.alertviewer.server;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -75,12 +76,17 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("No Credentials provided"), HttpStatus.UNAUTHORIZED);
             }
             HttpHeaders responseHeaders = new HttpHeaders();
-            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-banner", "CORTANA-token", "CORTANA-user", "CORTANA-role"));
+            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-banner", "CORTANA-token", "CORTANA-user", "CORTANA-role", "CORTANA-retention", "CORTANA-jira-url"));
             Registration reg = state.registerSession(dn, ingressUser);
             responseHeaders.set("CORTANA-TOKEN", reg.getToken());
             responseHeaders.set("CORTANA-USER", reg.getUser());
             responseHeaders.set("CORTANA-ROLE", reg.getRole());
             responseHeaders.set("CORTANA-BANNER", env.getProperty("banner.text"));
+            //how far back the timeline graph can usefully be zoomed out: anything
+            //older has already been swept by the ingester's RESOLVED cleanup
+            responseHeaders.set("CORTANA-RETENTION", env.getProperty("resolved.remove.minutes", "10080"));
+            //base of the jira the tickets land in; the UI appends /browse/<key> to reach one
+            responseHeaders.set("CORTANA-JIRA-URL", env.getProperty("jira.base.url", ""));
             return new ResponseEntity("login successful", responseHeaders, HttpStatus.OK);
         } catch (Exception e) {
             log.error("Login error: "+e.getMessage(), e);
@@ -95,6 +101,7 @@ public class RestEndpoint {
                           @RequestParam(required = false,value = "end")String end,
                           @RequestParam(required = false,value = "statuses")List<String> statuses,
                           @RequestParam(required = false,value = "environments")List<String> environments,
+                          @RequestParam(required = false,value = "callinOnly",defaultValue = "false")boolean callinOnly,
                           HttpServletResponse response) {
 
         if (!state.isValidSession(token)) {
@@ -104,7 +111,7 @@ public class RestEndpoint {
 
         response.setHeader("Content-Disposition", "attachment; filename=export.txt");
         try {
-            return requestService.request(severity, start, end, statuses, environments, null, true).getContent();
+            return requestService.request(severity, start, end, statuses, environments, null, true, callinOnly).getContent();
         } catch (ServiceException e) {
             log.error("Export error: "+e.getMessage(), e);
             return "ERROR: "+e.getMessage();
@@ -119,7 +126,9 @@ public class RestEndpoint {
                                     @RequestParam(required = false,value = "end")String end,
                                     @RequestParam(required = false,value = "statuses")List<String> statuses,
                                     @RequestParam(required = false,value = "groupField")String groupField,
-                                    @RequestParam(required = false,value = "environments")List<String> environments) {
+                                    @RequestParam(required = false,value = "environments")List<String> environments,
+                                    //absent means "every alert", so old links keep working
+                                    @RequestParam(required = false,value = "callinOnly",defaultValue = "false")boolean callinOnly) {
 
         try {
             if (!state.isValidSession(token)) {
@@ -127,9 +136,28 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
             log.debug("Query: statuses="+statuses);
-            return new ResponseEntity<>(new ServiceResponse<>("Query complete", requestService.request(severity, start, end, statuses, environments, groupField, false)), HttpStatus.OK);
+            return new ResponseEntity<>(new ServiceResponse<>("Query complete", requestService.request(severity, start, end, statuses, environments, groupField, false, callinOnly)), HttpStatus.OK);
         } catch (ServiceException e) {
             log.error("Request error: "+e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    //the routing tree of every alertmanager, as read from their live status apis.
+    //served from the ingester's cache, so opening the screen costs no round trip to
+    //alertmanager. a dedicated endpoint rather than a field on the alerts payload:
+    //this is large and near-static, and /alerts is polled every 30 seconds.
+    @GetMapping(value = "/routes", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ServiceResponse<RoutingResponse>> routes(@RequestHeader("CORTANA-TOKEN") String token) {
+        try {
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: routes");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
+            return new ResponseEntity<>(new ServiceResponse<>("Query complete",
+                    new RoutingResponse(state.getAllRouting())), HttpStatus.OK);
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
@@ -342,12 +370,56 @@ public class RestEndpoint {
             java.net.http.HttpResponse<String> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode()==200) {
-                return new ResponseEntity<>(new ServiceResponse<>("Jira added with label " + jira.getId()), HttpStatus.OK);
+                //wraith reports the tickets it made as {"jira_issues_created":["GMDEV-31"]}. The
+                //array is empty when it matched an existing unresolved ticket instead of making
+                //one, and older wraith builds answer 200 with no body at all.
+                String key = firstIssueKey(response.body());
+                if (key == null) {
+                    log.debug("No jira key in wraith response, nothing to store: " + response.body());
+                    return new ResponseEntity<>(new ServiceResponse<>("Jira added with label " + jira.getId()), HttpStatus.OK);
+                }
+                if (!storeJiraKey(jira.getId(), key)) {
+                    log.warn("Created jira " + key + " but found no alert for " + jira.getId());
+                }
+                return new ResponseEntity<>(new ServiceResponse<>("Jira " + key + " created"), HttpStatus.OK);
             } else {
                 log.warn("Error submitting to jira: "+response.body());
                 log.debug(newJson);
                 return new ResponseEntity<>(new ServiceResponse<>("Error submitting to jira"), HttpStatus.valueOf(response.statusCode()));
             }
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    //link an alert to a jira ticket that already exists, instead of making one.
+    //nothing is sent to wraith: the key is simply recorded against the alert.
+    @PostMapping(value = "/jira/link", consumes = MediaType.TEXT_PLAIN_VALUE)
+    public ResponseEntity<ServiceResponse<Void>> jiraLink(@RequestHeader("CORTANA-TOKEN") String token,
+                                                          @RequestParam(value = "id")String id,
+                                                          @RequestBody String key) {
+        try {
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: jiraLink");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
+            String cleaned = (key == null) ? "" : key.trim().toUpperCase();
+            //jira keys are PROJECT-123; reject anything else rather than hang a
+            //dead link off the alert, since there is no way to ask jira if it exists
+            if (!cleaned.matches("[A-Z][A-Z0-9_]*-[0-9]+")) {
+                return new ResponseEntity<>(new ServiceResponse<>("'" + key + "' is not a jira key like GMDEV-31"), HttpStatus.BAD_REQUEST);
+            }
+            Optional<AlertManagerEntry> o = logRepo.findById(id);
+            if (o.isEmpty()) {
+                return new ResponseEntity<>(new ServiceResponse<>("Record not found"), HttpStatus.BAD_REQUEST);
+            }
+            AlertManagerEntry le = o.get();
+            String was = le.getJiraKey();
+            le.setJiraKey(cleaned);
+            logRepo.save(le);
+            addNote(id, state.getUser(token), "Jira: linked " + cleaned + ((was == null) ? "" : " (was " + was + ")"));
+            return new ResponseEntity<>(new ServiceResponse<>("Jira " + cleaned + " linked"), HttpStatus.OK);
         } catch (Exception e) {
             log.error(e.getMessage(), e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
@@ -390,6 +462,35 @@ public class RestEndpoint {
             log.error(e.getMessage(), e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
+    }
+
+    //first key of wraith's jira_issues_created, or null if it reported none
+    private String firstIssueKey(String body) {
+        if (body == null || body.isBlank()) { return null; }
+        try {
+            JsonNode created = new ObjectMapper().readTree(body).path("jira_issues_created");
+            if (created.isArray() && created.size() > 0) {
+                String key = created.get(0).asText(null);
+                return (key == null || key.isBlank()) ? null : key;
+            }
+        } catch (Exception e) {
+            log.warn("Could not read jira key from wraith response: " + body, e);
+        }
+        return null;
+    }
+
+    //the ticket is labelled "cortana:<fingerprint>" but the alert is stored under the
+    //fingerprint alone, so drop the prefix the UI added
+    private boolean storeJiraKey(String jiraId, String key) {
+        if (jiraId == null) { return false; }
+        int colon = jiraId.indexOf(':');
+        String id = (colon >= 0) ? jiraId.substring(colon + 1) : jiraId;
+        Optional<AlertManagerEntry> o = logRepo.findById(id);
+        if (o.isEmpty()) { return false; }
+        AlertManagerEntry le = o.get();
+        le.setJiraKey(key);
+        logRepo.save(le);
+        return true;
     }
 
     private boolean addNote(String id, String user, String note) throws Exception {

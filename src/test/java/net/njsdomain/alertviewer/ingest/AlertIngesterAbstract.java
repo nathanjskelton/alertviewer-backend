@@ -7,6 +7,7 @@ import net.njsdomain.alertviewer.data.AlertManagerEntryRepo;
 import net.njsdomain.alertviewer.data.alert.Alert;
 import net.njsdomain.alertviewer.ingest.alertmananer.AlertIngester;
 import net.njsdomain.alertviewer.ingest.alertmananer.AlertManagerClient;
+import net.njsdomain.alertviewer.ingest.alertmananer.AlertManagerConfigParser;
 import net.njsdomain.alertviewer.ingest.alertmananer.AlertManagerUtil;
 import net.njsdomain.alertviewer.server.StateBuffer;
 import org.assertj.core.util.Lists;
@@ -54,6 +55,12 @@ public abstract class AlertIngesterAbstract {
 
     @Mock
     AlertManagerClient alertManagerClient;
+
+    //@InjectMocks leaves any @Autowired field it has no mock for null, so the
+    //ingester's routing refresh would NPE. The mocked client returns no yaml, so
+    //these scenarios take the early return and never reach the parser.
+    @Mock
+    AlertManagerConfigParser configParser;
 
     @Mock
     AlertManagerEntryRepo repo;

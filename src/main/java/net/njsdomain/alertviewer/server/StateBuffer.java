@@ -3,6 +3,7 @@ package net.njsdomain.alertviewer.server;
 import net.njsdomain.alertviewer.data.AlertManagerConfig;
 import net.njsdomain.alertviewer.data.AlertManagerUser;
 import net.njsdomain.alertviewer.data.AlertManagerUserRepo;
+import net.njsdomain.alertviewer.data.routing.AlertManagerRouting;
 import net.njsdomain.alertviewer.data.silence.Silence;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -24,6 +25,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
@@ -119,6 +121,29 @@ public class StateBuffer {
 
     public Instant getLastIngestSuccess() {
         return lastIngestSuccess;
+    }
+
+    //routing tree per alertmanager, refreshed by the ingester from each one's status
+    //api. a plain per-key put rather than the clear-then-refill used for silences, so
+    //a reader never catches it empty mid-refresh.
+    private final Map<String, AlertManagerRouting> routing = new ConcurrentHashMap<>();
+
+    public void setRouting(String alertmanagerName, AlertManagerRouting r) {
+        routing.put(alertmanagerName, r);
+    }
+
+    public AlertManagerRouting getRouting(String alertmanagerName) {
+        return routing.get(alertmanagerName);
+    }
+
+    //in configured order, so the ui lists alertmanagers the same way everywhere
+    public List<AlertManagerRouting> getAllRouting() {
+        List<AlertManagerRouting> all = new ArrayList<>();
+        for (String name : getAlertmanagerNames()) {
+            AlertManagerRouting r = routing.get(name);
+            all.add(r != null ? r : new AlertManagerRouting(name));
+        }
+        return all;
     }
 
     public Collection<AlertManagerConfig> getAlertmanagers() {

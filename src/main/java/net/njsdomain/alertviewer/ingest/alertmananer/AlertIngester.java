@@ -9,6 +9,10 @@ import com.mongodb.client.result.DeleteResult;
 import net.njsdomain.alertviewer.data.AlertManagerConfig;
 import net.njsdomain.alertviewer.data.AlertManagerEntry;
 import net.njsdomain.alertviewer.data.AlertManagerEntryRepo;
+import net.njsdomain.alertviewer.data.routing.AlertManagerRouting;
+import javax.xml.bind.DatatypeConverter;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import net.njsdomain.alertviewer.data.MetaDataHelper;
 import net.njsdomain.alertviewer.data.alert.Alert;
 import net.njsdomain.alertviewer.data.silence.Silence;
@@ -52,6 +56,9 @@ public class AlertIngester implements Ingester {
     AlertManagerClient alertManagerClient;
 
     @Autowired
+    AlertManagerConfigParser configParser;
+
+    @Autowired
     MetaDataHelper meta;
 
     @Autowired
@@ -75,12 +82,65 @@ public class AlertIngester implements Ingester {
                 online++;
             }
             silences.addAll(getSilences(c));
+            refreshRouting(c);
         }
         log.debug("FINISHED INGEST, there are "+silences.size()+" silences");
         state.setSilences(silences);
         state.setLastIngestAttempt();
         if (online > 0) state.setLastIngestSuccess();
         state.setAlertManagerStatus(max, online);
+    }
+
+    /**
+     * Re-read one alertmanager's routing tree from its status api.
+     *
+     * A failure here never clears what is already cached and never touches the
+     * alertmanager's up/down state: not being able to read the config says nothing
+     * about whether alerts are ingesting, and blanking the routes screen over a
+     * blip would be worse than showing the last known tree marked stale.
+     */
+    private void refreshRouting(AlertManagerConfig amConfig) {
+        AlertManagerRouting previous = state.getRouting(amConfig.getName());
+        try {
+            String yaml = alertManagerClient.getRoutingYaml(state, amConfig);
+            if (yaml == null) {
+                markRoutingStale(amConfig, previous, "Could not read the configuration from " + amConfig.getName());
+                return;
+            }
+            String hash = hash(yaml);
+            if (previous != null && previous.isAvailable() && hash != null && hash.equals(previous.getConfigHash())) {
+                //unchanged since the last cycle, so skip the reparse
+                previous.setStale(false);
+                previous.setError(null);
+                previous.setFetchedAt(System.currentTimeMillis());
+                return;
+            }
+            AlertManagerRouting routing = configParser.parse(amConfig.getName(), yaml);
+            routing.setConfigHash(hash);
+            state.setRouting(amConfig.getName(), routing);
+            log.debug("Refreshed routing config for " + amConfig.getName()
+                    + " (" + routing.getReceivers().size() + " receivers)");
+        } catch (Exception e) {
+            log.warn("Unable to refresh the routing config for " + amConfig.getName() + ": " + e.getMessage());
+            markRoutingStale(amConfig, previous, "Could not read the configuration: " + e.getMessage());
+        }
+    }
+
+    private void markRoutingStale(AlertManagerConfig amConfig, AlertManagerRouting previous, String error) {
+        AlertManagerRouting routing = (previous != null) ? previous : new AlertManagerRouting(amConfig.getName());
+        routing.setStale(true);
+        routing.setError(error);
+        state.setRouting(amConfig.getName(), routing);
+    }
+
+    private String hash(String text) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            return DatatypeConverter.printHexBinary(md.digest(text.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            //without a hash the config simply reparses every cycle, which is harmless
+            return null;
+        }
     }
 
 

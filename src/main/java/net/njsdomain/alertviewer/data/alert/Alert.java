@@ -10,6 +10,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -51,6 +54,36 @@ public class Alert {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    /**
+     * The receivers alertmanager routed this alert to, as plain names.
+     *
+     * The raw field holds whatever the api version gave us: v2 sends objects
+     * ({"name":"bugle"}) and v1 sends bare strings, so both shapes sit in the
+     * database. Normalising once here keeps every consumer off that difference.
+     * Spring Data maps fields rather than getters, so this adds nothing to mongo.
+     */
+    @JsonProperty("receiverNames")
+    public List<String> getReceiverNames() {
+        List<String> names = new ArrayList<>();
+        if (receivers == null) {
+            return names;
+        }
+        for (Object r : receivers) {
+            String name = null;
+            if (r instanceof Map) {
+                Object n = ((Map<?, ?>) r).get("name");
+                name = (n == null) ? null : String.valueOf(n);
+            } else if (r != null) {
+                name = String.valueOf(r);
+            }
+            if (name != null && !name.isBlank() && !names.contains(name)) {
+                names.add(name);
+            }
+        }
+        Collections.sort(names);
+        return names;
     }
 
     @JsonProperty("labels")

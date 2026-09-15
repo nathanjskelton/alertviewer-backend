@@ -3,6 +3,7 @@ package net.njsdomain.alertviewer.server;
 import com.mongodb.client.DistinctIterable;
 import com.mongodb.client.model.Filters;
 import net.njsdomain.alertviewer.data.AlertGroup;
+import net.njsdomain.alertviewer.data.AlertHistory;
 import net.njsdomain.alertviewer.data.AlertManagerEntry;
 import net.njsdomain.alertviewer.util.LogEntryStatus;
 import org.bson.BsonDocument;
@@ -34,7 +35,8 @@ public class RequestService {
 
 
     public RequestResponse request(List<String> severity, String start, String end,
-                                   List<String> statusStrings, List<String> environments, String groupField, boolean export)
+                                   List<String> statusStrings, List<String> environments, String groupField, boolean export,
+                                   boolean callinOnly)
             throws ServiceException {
 
         log.debug("start="+start+", end="+end);
@@ -94,7 +96,6 @@ public class RequestService {
         if (statusEnums.contains(LogEntryStatus.SILENCED)) criteriaOrList.add(silencedCriteria);
 
 
-
         //combine the appropriate criteria based on selected statuses
         Criteria criteria = new Criteria();
         if (criteriaOrList.size() > 1) {
@@ -141,11 +142,22 @@ public class RequestService {
         Criteria flappingFalse = Criteria.where("flapping").is(false);
         if (!statusEnums.contains(LogEntryStatus.FLAPPING)) andMe.add(flappingFalse);
 
+        //callin alerts are the ones whose callin label reads true or 1. Anything
+        //else -- absent, empty, false, "no" -- is not a callin. Matched
+        //case-insensitively since the label is free text from the alert rules.
+        if (callinOnly) {
+            log.debug("anding callin");
+            andMe.add(Criteria.where("alert.labels.callin").regex("^(true|1)$", "i"));
+        }
+
         Criteria finalCriteria;
         if (!andMe.isEmpty()) {
             log.debug("making a query with ands");
-            andMe.add(criteria);
-            finalCriteria = new Criteria().andOperator(andMe.toArray(new Criteria[0]));
+            //copy rather than add to andMe: the history query below reuses it and
+            //must not inherit the status clause
+            List<Criteria> mainAnds = new ArrayList<>(andMe);
+            mainAnds.add(criteria);
+            finalCriteria = new Criteria().andOperator(mainAnds.toArray(new Criteria[0]));
         } else {
             log.debug("making a query without ands");
             finalCriteria = criteria;
@@ -155,6 +167,37 @@ public class RequestService {
         query.with(Sort.by(Sort.Direction.DESC, "alert.startsAt"));
         log.debug("QUERY: "+query.toString());
         List<AlertManagerEntry> list = mongo.find(query, AlertManagerEntry.class);
+
+        //The timeline graph plots firing history, which is almost entirely
+        //resolved alerts, so it would go empty whenever the viewer unticked
+        //RESOLVED. Fetch them separately in the cut-down AlertHistory shape,
+        //under the same non-status filters the table is using, so the graph
+        //keeps its history without the table gaining rows or the response
+        //carrying notes and labels nothing reads.
+        //
+        //Skipped when the caller did ask for RESOLVED, or did not restrict by
+        //status at all: either way the full entries above already include them,
+        //and returning them twice would double every history bar.
+        List<AlertHistory> history = new ArrayList<>();
+        if (!criteriaOrList.isEmpty() && !statusEnums.contains(LogEntryStatus.RESOLVED)) {
+            List<Criteria> historyAnds = new ArrayList<>(andMe);
+            historyAnds.add(resolvedCriteria);
+            Query historyQuery = new Query(new Criteria().andOperator(historyAnds.toArray(new Criteria[0])));
+            historyQuery.fields()
+                    .include("status")
+                    .include("alert.startsAt")
+                    .include("alert.endsAt")
+                    .include("alert.labels.alertname")
+                    .include("alert.labels.severity")
+                    .include("alert.labels.environment")
+                    .include("alert.labels.instance")
+                    .include("alert.labels.team")
+                    .include("alert.annotations.summary");
+            historyQuery.with(Sort.by(Sort.Direction.DESC, "alert.startsAt"));
+            log.debug("HISTORY QUERY: "+historyQuery);
+            history = mongo.find(historyQuery, AlertHistory.class, "AlertManagerEntry");
+            log.debug("history returned "+history.size()+" resolved alerts");
+        }
         Set<String> allFields = new TreeSet<>();
 
         //group by groupfield if specified
@@ -199,6 +242,6 @@ public class RequestService {
 
         List<String> seve = StreamSupport.stream(severities.spliterator(), false)
                 .collect(Collectors.toList());
-        return new RequestResponse(map, state.getSilences(), inst, seve, state.getAlertmanagerNames(), allFields, export);
+        return new RequestResponse(map, history, state.getSilences(), inst, seve, state.getAlertmanagerNames(), allFields, export);
     }
 }

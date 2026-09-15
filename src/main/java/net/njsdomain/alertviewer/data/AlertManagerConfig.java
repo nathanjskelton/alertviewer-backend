@@ -35,6 +35,17 @@ public class AlertManagerConfig {
         return url + "/api/" + apiVersion + "/silences";
     }
 
+    //the routing tree comes from the status api. v2 is used regardless of the configured
+    //api version: it carries the resolved config at config.original and is available even
+    //on instances this app talks to over v1.
+    public String getStatusUrl() {
+        return url + "/api/v2/status";
+    }
+
+    public String getStatusUrlV1() {
+        return url + "/api/v1/status";
+    }
+
     public String getSilenceUrl() {
         return url + "/api/" + apiVersion + "/silence";
     }

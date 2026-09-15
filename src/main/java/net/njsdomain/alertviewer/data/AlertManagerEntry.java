@@ -39,6 +39,9 @@ public class AlertManagerEntry {
 
     private Alert alert;
 
+    //key of the jira ticket wraith created for this alert, null until one is made
+    private String jiraKey;
+
     private long lastChange = 0L;
 
     public AlertManagerEntry(Alert alert) {
@@ -75,6 +78,14 @@ public class AlertManagerEntry {
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy.MM.dd 'at' HH:mm:ss");
         friendlyStartTime = alert.getStartsAt().format(dtf);
         friendlyEndTime = alert.getEndsAt().format(dtf);
+    }
+
+    public String getJiraKey() {
+        return jiraKey;
+    }
+
+    public void setJiraKey(String jiraKey) {
+        this.jiraKey = jiraKey;
     }
 
     public long getLastChange() {

@@ -1,6 +1,7 @@
 package net.njsdomain.alertviewer.server;
 
 import net.njsdomain.alertviewer.data.AlertGroup;
+import net.njsdomain.alertviewer.data.AlertHistory;
 import net.njsdomain.alertviewer.data.AlertManagerEntry;
 import net.njsdomain.alertviewer.data.silence.Silence;
 
@@ -14,6 +15,13 @@ public class RequestResponse {
     private boolean export;
     private Map<String, AlertGroup> entries;
 
+    /**
+     * Resolved alerts the caller's status filter excluded, cut down to what the
+     * timeline graph and gantt read. Empty when {@code entries} already carries
+     * the resolved alerts, so the client can always just concatenate the two.
+     */
+    private List<AlertHistory> history;
+
     private List<String> alertmanagers;
 
     private Collection<Silence> silences;
@@ -26,8 +34,9 @@ public class RequestResponse {
 
     private Set<String> allFields;
 
-    public RequestResponse(Map<String, AlertGroup> map, Collection<Silence> silences, List<String> instances,
-                           List<String> severities, List<String> alertmanagers, Set<String> allFields, boolean export) {
+    public RequestResponse(Map<String, AlertGroup> map, List<AlertHistory> history, Collection<Silence> silences,
+                           List<String> instances, List<String> severities, List<String> alertmanagers,
+                           Set<String> allFields, boolean export) {
         this.export = export;
         content = new StringBuilder();
 
@@ -43,6 +52,7 @@ public class RequestResponse {
         */
 
         this.entries = map;
+        this.history = history;
         this.instances = instances;
         this.severities = severities;
         this.silences = silences;
@@ -70,6 +80,10 @@ public class RequestResponse {
 
     public Map<String, AlertGroup> getEntries() {
         return entries;
+    }
+
+    public List<AlertHistory> getHistory() {
+        return history;
     }
 
     public String getContent() {
