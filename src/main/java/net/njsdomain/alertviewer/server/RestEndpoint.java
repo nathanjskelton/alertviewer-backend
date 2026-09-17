@@ -24,8 +24,10 @@ import javax.servlet.http.HttpServletResponse;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import java.io.ByteArrayInputStream;
@@ -76,7 +78,7 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("No Credentials provided"), HttpStatus.UNAUTHORIZED);
             }
             HttpHeaders responseHeaders = new HttpHeaders();
-            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-banner", "CORTANA-token", "CORTANA-user", "CORTANA-role", "CORTANA-retention", "CORTANA-jira-url"));
+            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-banner", "CORTANA-token", "CORTANA-user", "CORTANA-role", "CORTANA-retention", "CORTANA-jira-url", "CORTANA-jira-label-prefix"));
             Registration reg = state.registerSession(dn, ingressUser);
             responseHeaders.set("CORTANA-TOKEN", reg.getToken());
             responseHeaders.set("CORTANA-USER", reg.getUser());
@@ -87,6 +89,9 @@ public class RestEndpoint {
             responseHeaders.set("CORTANA-RETENTION", env.getProperty("resolved.remove.minutes", "10080"));
             //base of the jira the tickets land in; the UI appends /browse/<key> to reach one
             responseHeaders.set("CORTANA-JIRA-URL", env.getProperty("jira.base.url", ""));
+            //prefix on the jira label carrying the fingerprint, so the details panel can
+            //show the same label the rebuild searches on
+            responseHeaders.set("CORTANA-JIRA-LABEL-PREFIX", env.getProperty("jira.label.prefix", "alertmanager"));
             return new ResponseEntity("login successful", responseHeaders, HttpStatus.OK);
         } catch (Exception e) {
             log.error("Login error: "+e.getMessage(), e);
@@ -426,6 +431,89 @@ public class RestEndpoint {
         }
     }
 
+    //re-point every alert at whatever ticket jira currently labels with its
+    //fingerprint. Wraith answers {"<prefix>:<fingerprint>":["GMDEV-53", ...]} for
+    //the labels asked about, and the first ticket listed wins. An alert whose label
+    //came back with no tickets keeps the link it has unless clear is asked for, since
+    //dropping links -- manual ones included -- is not something to do by default.
+    @PostMapping(value = "/jira/rebuild")
+    public ResponseEntity<ServiceResponse<Void>> jiraRebuild(@RequestHeader("CORTANA-TOKEN") String token,
+                                                             @RequestParam(value = "clear", required = false, defaultValue = "false") boolean clear) {
+        try {
+            //one press rewrites links across every alert in the system
+            if (!state.isAdmin(token)) {
+                log.info("Unauthorized endpoint access: jiraRebuild");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
+
+            String url = env.getProperty("wraith.search.labels.url");
+            if (url == null || url.isBlank()) {
+                return new ResponseEntity<>(new ServiceResponse<>("No wraith.search.labels.url configured"), HttpStatus.SERVICE_UNAVAILABLE);
+            }
+            //which prefix the tickets carry depends on what raised them, so it is
+            //configuration rather than a constant
+            String prefix = env.getProperty("jira.label.prefix", "alertmanager");
+
+            List<AlertManagerEntry> entries = logRepo.findAll();
+            if (entries.isEmpty()) {
+                return new ResponseEntity<>(new ServiceResponse<>("No alerts to rebuild"), HttpStatus.OK);
+            }
+
+            ObjectMapper objectMapper = new ObjectMapper();
+            List<String> labels = new ArrayList<>();
+            for (AlertManagerEntry le : entries) {
+                labels.add(prefix + ":" + le.getId());
+            }
+            String newJson = objectMapper.writeValueAsString(Map.of("labels", labels));
+            log.info("Rebuilding jira links for " + labels.size() + " alerts via " + url + (clear ? ", clearing unmatched" : ""));
+
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(new URI(url))
+                    .POST(HttpRequest.BodyPublishers.ofString(newJson))
+                    .header("Content-Type", "application/json")
+                    .build();
+            java.net.http.HttpResponse<String> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                log.warn("Error searching jira labels: " + response.body());
+                return new ResponseEntity<>(new ServiceResponse<>("Error searching jira"), HttpStatus.valueOf(response.statusCode()));
+            }
+
+            JsonNode found = objectMapper.readTree(response.body());
+            String user = state.getUser(token);
+            int linked = 0;
+            int cleared = 0;
+            for (AlertManagerEntry le : entries) {
+                String key = firstLabelKey(found, prefix + ":" + le.getId());
+                String was = le.getJiraKey();
+                if (was != null && was.isBlank()) { was = null; }
+                //no ticket carries this label. Leave whatever the alert already
+                //points at alone unless the caller asked for unmatched links to go
+                if (key == null && !clear) { continue; }
+                //leave the record alone unless the rebuild actually changes it, so
+                //a re-run does not add a note to every alert a second time
+                if ((key == null) ? (was == null) : key.equals(was)) { continue; }
+                le.setJiraKey(key);
+                logRepo.save(le);
+                if (key == null) {
+                    cleared++;
+                    addNote(le.getId(), user, "Jira: rebuild cleared " + was);
+                } else {
+                    linked++;
+                    addNote(le.getId(), user, "Jira: rebuild linked " + key + ((was == null) ? "" : " (was " + was + ")"));
+                }
+            }
+
+            log.info("Jira rebuild linked " + linked + ", cleared " + cleared);
+            String cleanup = clear ? (", " + cleared + " cleared") : "";
+            return new ResponseEntity<>(new ServiceResponse<>("Jira rebuild: " + linked + " linked" + cleanup + ", of " + entries.size() + " alerts"), HttpStatus.OK);
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
     @DeleteMapping(value = "/silence")
     public ResponseEntity<ServiceResponse<Void>> deleteSilence(@RequestHeader("CORTANA-TOKEN") String token,
                                                                @RequestParam(value = "id")String id) {
@@ -477,6 +565,14 @@ public class RestEndpoint {
             log.warn("Could not read jira key from wraith response: " + body, e);
         }
         return null;
+    }
+
+    //the first ticket wraith listed under a label, or null when it listed none
+    private String firstLabelKey(JsonNode found, String label) {
+        JsonNode tickets = found.path(label);
+        if (!tickets.isArray() || tickets.size() == 0) { return null; }
+        String key = tickets.get(0).asText(null);
+        return (key == null || key.isBlank()) ? null : key.trim().toUpperCase();
     }
 
     //the ticket is labelled "cortana:<fingerprint>" but the alert is stored under the
