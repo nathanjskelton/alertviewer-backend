@@ -8,6 +8,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -144,7 +145,7 @@ public class AlertManagerEntry {
     }
 
     public void addNote(String user, String message) {
-        Note note = new Note(LocalDateTime.now(), user, message);
+        Note note = new Note(LocalDateTime.now(ZoneOffset.UTC), user, message);
         notes.add(note);
     }
 

@@ -44,6 +44,7 @@ import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -342,7 +343,7 @@ public class AlertIngester implements Ingester {
      */
     private void expireResolved() {
         String minutes = env.getProperty("resolved.remove.minutes", "10080");
-        LocalDateTime date = LocalDateTime.now().minusMinutes(Integer.parseInt(minutes));
+        LocalDateTime date = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(Integer.parseInt(minutes));
         Query query = new Query();
         query.addCriteria(Criteria.where("status").is(LogEntryStatus.RESOLVED)
                 .andOperator(Criteria.where("alert.endsAt").lte(date)));
@@ -466,7 +467,7 @@ public class AlertIngester implements Ingester {
      * ingest over, so it is logged and left.
      */
     private void recordLabelValues(String alertmanager, Map<String, Set<String>> labelValues) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         int added = 0;
         for (Map.Entry<String, Set<String>> entry : labelValues.entrySet()) {
             String type = entry.getKey();
@@ -620,7 +621,7 @@ public class AlertIngester implements Ingester {
                     //set hours based on dates
                     Duration dur = Duration.between(silence.getStartsat(), silence.getEndsat());
                     silence.setHours(dur.toHours());
-                    Duration rem = Duration.between(LocalDateTime.now(), silence.getEndsat());
+                    Duration rem = Duration.between(LocalDateTime.now(ZoneOffset.UTC), silence.getEndsat());
                     silence.setHoursLeft(rem.toHours());
                     existingSilences.add(silence);
                 }

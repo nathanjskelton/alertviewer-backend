@@ -30,6 +30,7 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -371,7 +372,7 @@ public class RestEndpoint {
 
             String silencesUrl = state.getAlertmanager(silence.getAlertmanager()).getSilencesUrl();
 
-            LocalDateTime dnow = LocalDateTime.now();
+            LocalDateTime dnow = LocalDateTime.now(ZoneOffset.UTC);
             silence.setUpdatedat(dnow);
             if (silence.getStartsat() == null || silence.getEndsat() == null) {
                 //the usual case: start now and run for the number of hours asked for
@@ -379,6 +380,9 @@ public class RestEndpoint {
                 silence.setEndsat(dnow.plusHours(silence.getHours()));
             } else if (!silence.getEndsat().isAfter(silence.getStartsat())) {
                 return new ResponseEntity<>(new ServiceResponse<>("A silence has to end after it starts"), HttpStatus.BAD_REQUEST);
+            } else if (!silence.getEndsat().isAfter(dnow)) {
+                //alertmanager would refuse it anyway, less helpfully
+                return new ResponseEntity<>(new ServiceResponse<>("That silence has already ended (times are UTC)"), HttpStatus.BAD_REQUEST);
             } else {
                 //an outage names its own window. Keep hours in step with it, since
                 //that is what the silences table counts down from

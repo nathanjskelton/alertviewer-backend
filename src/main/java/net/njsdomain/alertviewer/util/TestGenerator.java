@@ -4,6 +4,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
@@ -13,7 +14,7 @@ public class TestGenerator {
         System.out.println("Generating test files");
         int NUMFILES = 1;
 
-        LocalDateTime time = LocalDateTime.now();
+        LocalDateTime time = LocalDateTime.now(ZoneOffset.UTC);
         time = time.minusDays(2);
 
         for (int i = 0;i < NUMFILES;i++) {

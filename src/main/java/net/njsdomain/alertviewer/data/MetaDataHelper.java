@@ -5,6 +5,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 
@@ -43,7 +44,7 @@ public class MetaDataHelper {
     public LocalDateTime getLastEnd() {
         MetaData md = get();
         if (md == null) {
-            LocalDateTime ldt = LocalDateTime.now().minusDays(env.getProperty("initial.days.ago", Integer.class));
+            LocalDateTime ldt = LocalDateTime.now(ZoneOffset.UTC).minusDays(env.getProperty("initial.days.ago", Integer.class));
             md = new MetaData();
             md.setLastEndTime(ldt);
             save(md);
