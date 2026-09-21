@@ -4,10 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import net.njsdomain.alertviewer.data.AlertLabelValue;
+import net.njsdomain.alertviewer.data.AlertLabelValueRepo;
 import net.njsdomain.alertviewer.data.AlertManagerEntry;
 import net.njsdomain.alertviewer.data.AlertManagerEntryRepo;
 import net.njsdomain.alertviewer.data.AlertManagerUser;
+import net.njsdomain.alertviewer.data.alert.Alert;
 import net.njsdomain.alertviewer.data.jira.WraithGeneric;
+import net.njsdomain.alertviewer.data.jira.WraithTickets;
+import net.njsdomain.alertviewer.data.jira.WraithUrls;
 import net.njsdomain.alertviewer.data.silence.Silence;
 import net.njsdomain.alertviewer.util.SSLContextFactory;
 import org.slf4j.Logger;
@@ -23,11 +28,14 @@ import org.springframework.web.bind.annotation.*;
 import javax.servlet.http.HttpServletResponse;
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import java.io.ByteArrayInputStream;
@@ -48,6 +56,12 @@ public class RestEndpoint {
     @Autowired StateBuffer state;
     @Autowired
     AlertManagerEntryRepo logRepo;
+
+    @Autowired
+    AlertLabelValueRepo labelValueRepo;
+
+    @Autowired
+    WraithUrls wraith;
     @Autowired
     Environment env;
 
@@ -78,7 +92,7 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("No Credentials provided"), HttpStatus.UNAUTHORIZED);
             }
             HttpHeaders responseHeaders = new HttpHeaders();
-            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-banner", "CORTANA-token", "CORTANA-user", "CORTANA-role", "CORTANA-retention", "CORTANA-jira-url", "CORTANA-jira-label-prefix"));
+            responseHeaders.setAccessControlExposeHeaders(List.of("CORTANA-banner", "CORTANA-token", "CORTANA-user", "CORTANA-role", "CORTANA-retention", "CORTANA-jira-url", "CORTANA-jira-label-prefix", "CORTANA-jira-enabled"));
             Registration reg = state.registerSession(dn, ingressUser);
             responseHeaders.set("CORTANA-TOKEN", reg.getToken());
             responseHeaders.set("CORTANA-USER", reg.getUser());
@@ -92,6 +106,9 @@ public class RestEndpoint {
             //prefix on the jira label carrying the fingerprint, so the details panel can
             //show the same label the rebuild searches on
             responseHeaders.set("CORTANA-JIRA-LABEL-PREFIX", env.getProperty("jira.label.prefix", "alertmanager"));
+            //jira runs through wraith, so with no wraith url at all there is no jira
+            //here and the UI hides the controls rather than offering dead buttons
+            responseHeaders.set("CORTANA-JIRA-ENABLED", String.valueOf(wraith.enabled()));
             return new ResponseEntity("login successful", responseHeaders, HttpStatus.OK);
         } catch (Exception e) {
             log.error("Login error: "+e.getMessage(), e);
@@ -213,9 +230,11 @@ public class RestEndpoint {
                 log.info("Unauthorized endpoint access: mark");
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
-            markService.mark(id, status);
-            addNote(id, state.getUser(token), "Status set to "+status);
-            return new ResponseEntity<>(new ServiceResponse<>("Record "+id+" marked as "+status+" by "+state.getUser(token)), HttpStatus.OK);
+            //acking a resolved alert leaves its status alone, so let the service say
+            //what actually happened rather than assuming the status was written
+            String done = markService.mark(id, status);
+            addNote(id, state.getUser(token), done);
+            return new ResponseEntity<>(new ServiceResponse<>("Record "+id+": "+done+" by "+state.getUser(token)), HttpStatus.OK);
         } catch (Exception e) {
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
@@ -279,6 +298,62 @@ public class RestEndpoint {
         }
     }
 
+    /**
+     * The teams and environments ever seen on one alertmanager, for building an outage
+     * silence out of. Alerts are transient, so this is the curated list the ingest has
+     * been accumulating rather than whatever happens to be firing right now.
+     */
+    @GetMapping(value = "/labelvalues", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ServiceResponse<Map<String, List<String>>>> labelValues(
+            @RequestHeader("CORTANA-TOKEN") String token,
+            @RequestParam(value = "alertmanager") String alertmanager) {
+        try {
+            if (!state.isValidSession(token)) {
+                log.info("Unauthorized endpoint access: labelValues");
+                return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
+            }
+
+            List<String> environments = labelValuesOf(alertmanager, AlertLabelValue.ENVIRONMENT);
+            //an alert with no environment of its own is labelled with the alertmanager's
+            //name, so that name is always a real environment here whether or not any
+            //alert has needed it yet. Only add it if the list does not already have it
+            if (!environments.contains(alertmanager)) {
+                environments.add(0, alertmanager);
+            }
+
+            //which labels actually carry an environment on the wire. Alertviewer copies
+            //the alternative into "environment" when it reads an alert, but a silence
+            //is matched by alertmanager against the raw labels, which have no such copy
+            List<String> environmentLabels = new ArrayList<>();
+            environmentLabels.add("environment");
+            String alternative = Alert.getAlternativeEnvironmentLabel();
+            if (alternative != null && !environmentLabels.contains(alternative)) {
+                environmentLabels.add(alternative);
+            }
+
+            Map<String, List<String>> payload = new LinkedHashMap<>();
+            payload.put("environments", environments);
+            payload.put("teams", labelValuesOf(alertmanager, AlertLabelValue.TEAM));
+            payload.put("environmentLabels", environmentLabels);
+            return new ResponseEntity<>(new ServiceResponse<>("Label values", payload), HttpStatus.OK);
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+            return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    //sorted the way someone reading a list expects, not the way bytes sort
+    private List<String> labelValuesOf(String alertmanager, String type) {
+        List<String> values = new ArrayList<>();
+        for (AlertLabelValue lv : labelValueRepo.findByAlertmanagerAndType(alertmanager, type)) {
+            if (lv.getValue() != null && !lv.getValue().isBlank()) {
+                values.add(lv.getValue());
+            }
+        }
+        values.sort(String.CASE_INSENSITIVE_ORDER);
+        return values;
+    }
+
     @PostMapping(value = "/silence", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ServiceResponse<Void>> silence(@RequestHeader("CORTANA-TOKEN") String token,
                                                          @RequestBody String payload) {
@@ -296,12 +371,19 @@ public class RestEndpoint {
 
             String silencesUrl = state.getAlertmanager(silence.getAlertmanager()).getSilencesUrl();
 
-            //convert hours to dates and set updated
             LocalDateTime dnow = LocalDateTime.now();
-            silence.setStartsat(dnow);
             silence.setUpdatedat(dnow);
-            LocalDateTime ends = dnow.plusHours(silence.getHours());
-            silence.setEndsat(ends);
+            if (silence.getStartsat() == null || silence.getEndsat() == null) {
+                //the usual case: start now and run for the number of hours asked for
+                silence.setStartsat(dnow);
+                silence.setEndsat(dnow.plusHours(silence.getHours()));
+            } else if (!silence.getEndsat().isAfter(silence.getStartsat())) {
+                return new ResponseEntity<>(new ServiceResponse<>("A silence has to end after it starts"), HttpStatus.BAD_REQUEST);
+            } else {
+                //an outage names its own window. Keep hours in step with it, since
+                //that is what the silences table counts down from
+                silence.setHours(Duration.between(silence.getStartsat(), silence.getEndsat()).toHours());
+            }
 
 
             ObjectMapper objectMapper2 = new ObjectMapper();
@@ -347,6 +429,13 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
 
+            //no wraith means no jira in this deployment, which is worth saying
+            //plainly rather than failing on a null url further down
+            String wraithUrl = wraith.generic();
+            if (wraithUrl == null) {
+                return new ResponseEntity<>(new ServiceResponse<>("No wraith.base.url configured"), HttpStatus.SERVICE_UNAVAILABLE);
+            }
+
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.registerModule(new JavaTimeModule());
             WraithGeneric jira = objectMapper.readValue(payload, WraithGeneric.class);
@@ -368,7 +457,7 @@ public class RestEndpoint {
 
             java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().sslContext(sslContextFactory.getSSLContext()).build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(new URI(env.getProperty("wraith.generic.url")))
+                    .uri(new URI(wraithUrl))
                     .POST(HttpRequest.BodyPublishers.ofString(newJson))
                     .header("Content-Type", "application/json")
                     .build();
@@ -383,7 +472,8 @@ public class RestEndpoint {
                     log.debug("No jira key in wraith response, nothing to store: " + response.body());
                     return new ResponseEntity<>(new ServiceResponse<>("Jira added with label " + jira.getId()), HttpStatus.OK);
                 }
-                if (!storeJiraKey(jira.getId(), key)) {
+                //wraith only reports tickets it just raised, so this one is open
+                if (!storeJiraKey(jira.getId(), key, "open")) {
                     log.warn("Created jira " + key + " but found no alert for " + jira.getId());
                 }
                 return new ResponseEntity<>(new ServiceResponse<>("Jira " + key + " created"), HttpStatus.OK);
@@ -410,8 +500,7 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
             String cleaned = (key == null) ? "" : key.trim().toUpperCase();
-            //jira keys are PROJECT-123; reject anything else rather than hang a
-            //dead link off the alert, since there is no way to ask jira if it exists
+            //jira keys are PROJECT-123; reject anything else before bothering jira
             if (!cleaned.matches("[A-Z][A-Z0-9_]*-[0-9]+")) {
                 return new ResponseEntity<>(new ServiceResponse<>("'" + key + "' is not a jira key like GMDEV-31"), HttpStatus.BAD_REQUEST);
             }
@@ -421,10 +510,26 @@ public class RestEndpoint {
             }
             AlertManagerEntry le = o.get();
             String was = le.getJiraKey();
-            le.setJiraKey(cleaned);
+
+            //ask jira about the ticket now rather than leaving the status unknown until
+            //an ingest gets round to it: a closed ticket linked by hand should look
+            //closed straight away, not like live work for the next half minute
+            JsonNode issue = readJiraIssue(cleaned);
+            String linked = cleaned;
+            String status = null;
+            if (issue != null) {
+                status = WraithTickets.status(issue);
+                //a ticket that moved project answers under its new key
+                if (WraithTickets.key(issue) != null) { linked = WraithTickets.key(issue); }
+            }
+
+            le.setJiraKey(linked);
+            le.setJiraStatus(status);
             logRepo.save(le);
-            addNote(id, state.getUser(token), "Jira: linked " + cleaned + ((was == null) ? "" : " (was " + was + ")"));
-            return new ResponseEntity<>(new ServiceResponse<>("Jira " + cleaned + " linked"), HttpStatus.OK);
+
+            String note = "Jira: linked " + linked + describeTicket(status) + ((was == null) ? "" : " (was " + was + ")");
+            addNote(id, state.getUser(token), note);
+            return new ResponseEntity<>(new ServiceResponse<>("Jira " + linked + describeTicket(status) + " linked"), HttpStatus.OK);
         } catch (Exception e) {
             log.error(e.getMessage(), e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
@@ -432,10 +537,12 @@ public class RestEndpoint {
     }
 
     //re-point every alert at whatever ticket jira currently labels with its
-    //fingerprint. Wraith answers {"<prefix>:<fingerprint>":["GMDEV-53", ...]} for
-    //the labels asked about, and the first ticket listed wins. An alert whose label
-    //came back with no tickets keeps the link it has unless clear is asked for, since
-    //dropping links -- manual ones included -- is not something to do by default.
+    //fingerprint, and refresh whether that ticket is open or closed. Wraith answers
+    //{"<prefix>:<fingerprint>":[{"key":"GMDEV-53","status":"open"}, ...]} for the
+    //labels asked about, and the first open ticket wins, falling back to a closed one.
+    //An alert whose label came back with no tickets keeps the link it has unless clear
+    //is asked for, since dropping links -- manual ones included -- is not something to
+    //do by default.
     @PostMapping(value = "/jira/rebuild")
     public ResponseEntity<ServiceResponse<Void>> jiraRebuild(@RequestHeader("CORTANA-TOKEN") String token,
                                                              @RequestParam(value = "clear", required = false, defaultValue = "false") boolean clear) {
@@ -446,9 +553,9 @@ public class RestEndpoint {
                 return new ResponseEntity<>(new ServiceResponse<>("Unauthorized, please login"), HttpStatus.UNAUTHORIZED);
             }
 
-            String url = env.getProperty("wraith.search.labels.url");
-            if (url == null || url.isBlank()) {
-                return new ResponseEntity<>(new ServiceResponse<>("No wraith.search.labels.url configured"), HttpStatus.SERVICE_UNAVAILABLE);
+            String url = wraith.searchLabels();
+            if (url == null) {
+                return new ResponseEntity<>(new ServiceResponse<>("No wraith.base.url configured"), HttpStatus.SERVICE_UNAVAILABLE);
             }
             //which prefix the tickets carry depends on what raised them, so it is
             //configuration rather than a constant
@@ -484,30 +591,41 @@ public class RestEndpoint {
             String user = state.getUser(token);
             int linked = 0;
             int cleared = 0;
+            int restatused = 0;
             for (AlertManagerEntry le : entries) {
-                String key = firstLabelKey(found, prefix + ":" + le.getId());
+                JsonNode ticket = WraithTickets.preferred(found, prefix + ":" + le.getId());
+                String key = (ticket == null) ? null : WraithTickets.key(ticket);
+                String status = (ticket == null) ? null : WraithTickets.status(ticket);
                 String was = le.getJiraKey();
                 if (was != null && was.isBlank()) { was = null; }
+                String wasStatus = le.getJiraStatus();
                 //no ticket carries this label. Leave whatever the alert already
                 //points at alone unless the caller asked for unmatched links to go
                 if (key == null && !clear) { continue; }
                 //leave the record alone unless the rebuild actually changes it, so
                 //a re-run does not add a note to every alert a second time
-                if ((key == null) ? (was == null) : key.equals(was)) { continue; }
+                boolean sameKey = (key == null) ? (was == null) : key.equals(was);
+                if (sameKey && Objects.equals(status, wasStatus)) { continue; }
                 le.setJiraKey(key);
+                le.setJiraStatus((key == null) ? null : status);
                 logRepo.save(le);
                 if (key == null) {
                     cleared++;
                     addNote(le.getId(), user, "Jira: rebuild cleared " + was);
+                } else if (sameKey) {
+                    //same ticket as before, but it has opened or closed since
+                    restatused++;
+                    addNote(le.getId(), user, "Jira: " + key + " is now " + ((status == null) ? "of unknown status" : status));
                 } else {
                     linked++;
-                    addNote(le.getId(), user, "Jira: rebuild linked " + key + ((was == null) ? "" : " (was " + was + ")"));
+                    addNote(le.getId(), user, "Jira: rebuild linked " + key + ((WraithTickets.CLOSED.equals(status)) ? " (closed)" : "") + ((was == null) ? "" : " (was " + was + ")"));
                 }
             }
 
-            log.info("Jira rebuild linked " + linked + ", cleared " + cleared);
+            log.info("Jira rebuild linked " + linked + ", cleared " + cleared + ", restatused " + restatused);
             String cleanup = clear ? (", " + cleared + " cleared") : "";
-            return new ResponseEntity<>(new ServiceResponse<>("Jira rebuild: " + linked + " linked" + cleanup + ", of " + entries.size() + " alerts"), HttpStatus.OK);
+            String restated = (restatused > 0) ? (", " + restatused + " status changed") : "";
+            return new ResponseEntity<>(new ServiceResponse<>("Jira rebuild: " + linked + " linked" + cleanup + restated + ", of " + entries.size() + " alerts"), HttpStatus.OK);
         } catch (Exception e) {
             log.error(e.getMessage(), e);
             return new ResponseEntity<>(new ServiceResponse<>(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
@@ -567,17 +685,46 @@ public class RestEndpoint {
         return null;
     }
 
-    //the first ticket wraith listed under a label, or null when it listed none
-    private String firstLabelKey(JsonNode found, String label) {
-        JsonNode tickets = found.path(label);
-        if (!tickets.isArray() || tickets.size() == 0) { return null; }
-        String key = tickets.get(0).asText(null);
-        return (key == null || key.isBlank()) ? null : key.trim().toUpperCase();
+    //what jira says about one ticket, or null when it could not be asked -- including
+    //when this deployment has no wraith behind it, in which case linking carries on
+    //with the status unknown and a later refresh fills it in
+    private JsonNode readJiraIssue(String key) {
+        String url = wraith.getIssue();
+        if (url == null) {
+            return null;
+        }
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            HttpRequest request = HttpRequest.newBuilder().timeout(Duration.ofSeconds(15))
+                    .uri(new URI(url))
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of("key", key))))
+                    .header("Content-Type", "application/json")
+                    .build();
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder()
+                    .sslContext(sslContextFactory.getSSLContext()).build();
+            java.net.http.HttpResponse<String> response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                log.warn("Jira lookup of " + key + " answered " + response.statusCode() + ": " + response.body());
+                return null;
+            }
+            return objectMapper.readTree(response.body());
+        } catch (Exception e) {
+            log.warn("Could not read jira " + key + " while linking it", e);
+            return null;
+        }
+    }
+
+    //say something about a ticket's state only when it is worth saying: an open one,
+    //or one nothing could be learned about, reads better with nothing added
+    private String describeTicket(String status) {
+        if (WraithTickets.CLOSED.equals(status)) { return " (closed)"; }
+        if (WraithTickets.NOT_FOUND.equals(status)) { return " (jira has no such ticket)"; }
+        return "";
     }
 
     //the ticket is labelled "cortana:<fingerprint>" but the alert is stored under the
     //fingerprint alone, so drop the prefix the UI added
-    private boolean storeJiraKey(String jiraId, String key) {
+    private boolean storeJiraKey(String jiraId, String key, String status) {
         if (jiraId == null) { return false; }
         int colon = jiraId.indexOf(':');
         String id = (colon >= 0) ? jiraId.substring(colon + 1) : jiraId;
@@ -585,6 +732,7 @@ public class RestEndpoint {
         if (o.isEmpty()) { return false; }
         AlertManagerEntry le = o.get();
         le.setJiraKey(key);
+        le.setJiraStatus(status);
         logRepo.save(le);
         return true;
     }

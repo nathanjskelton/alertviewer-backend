@@ -38,7 +38,10 @@ public class AlertGroup {
     public void add(AlertManagerEntry entry) {
         this.list.add(entry);
         total++;
-        if (LogEntryStatus.NEW.equals(entry.getStatus()) || LogEntryStatus.FLAPPING.equals(entry.getStatus())) {
+        //an acked alert is still firing, but somebody has it, so it does not count
+        //towards the number the group is asking to be looked at
+        if (!entry.isAcked()
+                && (LogEntryStatus.NEW.equals(entry.getStatus()) || LogEntryStatus.FLAPPING.equals(entry.getStatus()))) {
             firing++;
         }
     }

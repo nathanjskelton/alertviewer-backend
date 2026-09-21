@@ -42,6 +42,11 @@ public class AlertManagerEntry {
     //key of the jira ticket wraith created for this alert, null until one is made
     private String jiraKey;
 
+    //"open" or "closed" for the ticket above, as jira last reported it. Null when
+    //nothing has asked jira yet -- a manually linked key starts out this way -- and
+    //callers treat that as open, since a ticket worth linking is usually still live
+    private String jiraStatus;
+
     private long lastChange = 0L;
 
     public AlertManagerEntry(Alert alert) {
@@ -86,6 +91,14 @@ public class AlertManagerEntry {
 
     public void setJiraKey(String jiraKey) {
         this.jiraKey = jiraKey;
+    }
+
+    public String getJiraStatus() {
+        return jiraStatus;
+    }
+
+    public void setJiraStatus(String jiraStatus) {
+        this.jiraStatus = jiraStatus;
     }
 
     public long getLastChange() {

@@ -1,10 +1,12 @@
 package net.njsdomain.alertviewer.ingest;
 
-import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.UpdateResult;
 import net.njsdomain.alertviewer.data.AlertManagerConfig;
 import net.njsdomain.alertviewer.data.AlertManagerEntry;
 import net.njsdomain.alertviewer.data.AlertManagerEntryRepo;
+import net.njsdomain.alertviewer.data.AlertLabelValue;
 import net.njsdomain.alertviewer.data.alert.Alert;
+import net.njsdomain.alertviewer.data.jira.WraithUrls;
 import net.njsdomain.alertviewer.ingest.alertmananer.AlertIngester;
 import net.njsdomain.alertviewer.ingest.alertmananer.AlertManagerClient;
 import net.njsdomain.alertviewer.ingest.alertmananer.AlertManagerConfigParser;
@@ -15,8 +17,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
-import org.mockito.Mock;
 import org.mockito.Mockito;
+import org.mockito.Mock;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.stubbing.Answer;
@@ -64,6 +66,11 @@ public abstract class AlertIngesterAbstract {
 
     @Mock
     AlertManagerEntryRepo repo;
+
+    //unstubbed, so every url comes back null: these scenarios run as a deployment with
+    //no wraith behind it, where the ingester's jira work skips itself
+    @Mock
+    WraithUrls wraith;
 
     @Mock
     MongoTemplate mongo;
@@ -176,10 +183,21 @@ public abstract class AlertIngesterAbstract {
                 }
             });
 
-            //records deleted
-            DeleteResult dr = Mockito.mock(DeleteResult.class);
-            given(dr.getDeletedCount()).willReturn(0L);
-            given(mongo.remove(any(), eq(AlertManagerEntry.class))).willReturn(dr);
+            //the ingest records the teams and environments it saw. Answer the upsert so
+            //it does not spend the run logging a failure per value against a bare mock
+            Mockito.lenient().when(mongo.upsert(any(), any(), eq(AlertLabelValue.class)))
+                    .thenAnswer(invocation -> {
+                        UpdateResult result = Mockito.mock(UpdateResult.class);
+                        Mockito.lenient().when(result.getUpsertedId()).thenReturn(null);
+                        return result;
+                    });
+
+            //the expiry reads the resolved alerts that have aged out before deciding
+            //what to delete. None of these scenarios are about expiry, and the ones
+            //that flip an alert between firing and resolved leave it with an end time
+            //old enough to be swept up, so report nothing expired rather than delete
+            //alerts the steps still assert on. Nothing is found, so nothing is removed
+            given(mongo.find(any(), eq(AlertManagerEntry.class))).willReturn(Lists.newArrayList());
 
             //run test
             runScenario();

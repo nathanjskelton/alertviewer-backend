@@ -93,10 +93,32 @@ public class Alert {
 
     @JsonProperty("labels")
     public void setLabels(Map<String, String> labels) {
-        if (labels.get("environment") == null && labels.get("gm_instance") != null) {
-            labels.put("environment", labels.get("gm_instance"));
+        //an alert that names its environment under some other label still belongs to
+        //that environment, so copy it across before anything else reads it
+        String alternative = alternativeEnvironmentLabel;
+        if (alternative != null && labels.get("environment") == null && labels.get(alternative) != null) {
+            labels.put("environment", labels.get(alternative));
         }
         this.labels = labels;
+    }
+
+    /**
+     * The label an alert may carry instead of "environment", from
+     * environment.label.alternative.
+     *
+     * Static because alerts are deserialized by jackson rather than built by spring,
+     * so there is nothing here to inject into. It keeps a working default so the class
+     * behaves the same in a test with no spring context around it, and a blank setting
+     * turns the fallback off for a site that does not need one.
+     */
+    private static volatile String alternativeEnvironmentLabel = "gm_instance";
+
+    public static void setAlternativeEnvironmentLabel(String label) {
+        alternativeEnvironmentLabel = (label == null || label.isBlank()) ? null : label.trim();
+    }
+
+    public static String getAlternativeEnvironmentLabel() {
+        return alternativeEnvironmentLabel;
     }
 
     public Map<String, String> getAnnotations() {

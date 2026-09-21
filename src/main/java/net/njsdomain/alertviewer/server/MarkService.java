@@ -20,24 +20,34 @@ public class MarkService {
     @Autowired
     AlertManagerEntryRepo repo;
 
-    public void mark(String id, String status) throws ServiceException {
+    /**
+     * Apply a mark to an entry, and report what was done so the caller can note it.
+     *
+     * ACKED and UNACKED move the ack flag and leave the status alone, so an alert can
+     * be acked whatever it is doing -- firing, silenced or long since resolved -- and
+     * unacking never has to guess which status to put back. Anything else is a status.
+     */
+    public String mark(String id, String status) throws ServiceException {
         LogEntryStatus ls = LogEntryStatus.valueOf(status);
         log.debug("Mark "+id+" as "+ls.toString());
         Optional<AlertManagerEntry> entry = repo.findById(id);
-        if (entry.isPresent()) {
-            AlertManagerEntry le = entry.get();
-            le.setStatus(LogEntryStatus.valueOf(status));
-            if (LogEntryStatus.ACKED.toString().equals(status)) {
-                le.setAcked(true);
-                le.setFlapping(false);
-            }
-            if (LogEntryStatus.NEW.toString().equals(status)) {
-                le.setAcked(false);
-            }
-            repo.save(le);
-        } else {
+        if (entry.isEmpty()) {
             throw new ServiceException("Record not found, unable to mark");
         }
+
+        AlertManagerEntry le = entry.get();
+        if (LogEntryStatus.ACKED.equals(ls) || LogEntryStatus.UNACKED.equals(ls)) {
+            boolean acked = LogEntryStatus.ACKED.equals(ls);
+            le.setAcked(acked);
+            //an acked alert is one somebody is holding, so stop calling it flappy
+            if (acked) { le.setFlapping(false); }
+            repo.save(le);
+            return acked ? "Acked" : "Unacked";
+        }
+
+        le.setStatus(ls);
+        repo.save(le);
+        return "Status set to "+status;
     }
 
     public void teams(String id, List<String> teams) throws ServiceException {

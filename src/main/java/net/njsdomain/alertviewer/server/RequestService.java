@@ -86,9 +86,6 @@ public class RequestService {
         Criteria newCriteria = Criteria.where("status").is(LogEntryStatus.NEW);
         if (statusEnums.contains(LogEntryStatus.NEW)) criteriaOrList.add(newCriteria);
 
-        Criteria ackedCriteria = Criteria.where("status").is(LogEntryStatus.ACKED);
-        if (statusEnums.contains(LogEntryStatus.ACKED)) criteriaOrList.add(ackedCriteria);
-
         Criteria resolvedCriteria = Criteria.where("status").is(LogEntryStatus.RESOLVED);
         if (statusEnums.contains(LogEntryStatus.RESOLVED)) criteriaOrList.add(resolvedCriteria);
 
@@ -141,6 +138,24 @@ public class RequestService {
 
         Criteria flappingFalse = Criteria.where("flapping").is(false);
         if (!statusEnums.contains(LogEntryStatus.FLAPPING)) andMe.add(flappingFalse);
+
+        //acking an alert takes it out of the view without changing what it is doing,
+        //so it filters like an attribute rather than a status. Legacy documents
+        //predate the flag and carry no field at all, which reads as not acked
+        Criteria notAcked = new Criteria().orOperator(
+                Criteria.where("acked").is(false),
+                Criteria.where("acked").exists(false));
+        if (!statusEnums.contains(LogEntryStatus.ACKED)) andMe.add(notAcked);
+
+        //raising a jira ticket is the other way to take an alert out of the firing
+        //view: a team that works from tickets rather than acks gets the same effect
+        //from raising one. The two are independent, so an alert can be acked,
+        //ticketed, both or neither, and either on its own is enough to hide it
+        Criteria noJiraTicket = new Criteria().orOperator(
+                Criteria.where("jiraKey").exists(false),
+                Criteria.where("jiraKey").is(null),
+                Criteria.where("jiraKey").is(""));
+        if (!statusEnums.contains(LogEntryStatus.JIRA)) andMe.add(noJiraTicket);
 
         //callin alerts are the ones whose callin label reads true or 1. Anything
         //else -- absent, empty, false, "no" -- is not a callin. Matched
